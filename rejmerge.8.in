@@ -1,0 +1,101 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH REJMERGE 8 "" "imai #VERSION#" "System Administration"
+.SH NAME
+rejmerge \- review and merge files rejected during package upgrades
+.SH SYNOPSIS
+.B rejmerge
+.RI [ options ]
+.SH DESCRIPTION
+.B rejmerge
+walks /var/lib/pkg/rejected under the selected root and compares rejected
+incoming files with their installed counterparts. Root privileges are required.
+Regular files offer keep, upgrade, merge, diff and skip choices. Other file
+types offer keep, upgrade, diff and skip. Permission differences are presented
+separately. Identical regular copies and rejected files without an existing
+installed counterpart are removed automatically.
+.PP
+Keep discards the rejected file; upgrade replaces the installed entry with it;
+skip leaves it for later. Merge produces a proposed result that can be viewed,
+edited and explicitly installed. Review conflict markers before installation.
+The default merge is a two-file merge, not a three-way merge using an ancestor.
+.SH OPTIONS
+.TP
+.BR \-r ", " \-\-root " " path
+Select another system's root instead of /. Its rejected directory and
+etc/rejmerge.conf are used.
+.TP
+.BR \-v ", " \-\-version
+Print the invoked command name, imai identity and version, then exit.
+.TP
+.BR \-h ", " \-\-help
+Print help and exit.
+.SH CONFIGURATION
+The C executable handles traversal, menu decisions and terminal input through
+an embedded Bash compatibility controller. If present, /etc/rejmerge.conf under
+the selected root is sourced in a persistent Bash context. It is trusted
+executable code with root privileges and can redefine controller variables and
+functions, including the lifecycle. File-operation, diff, merge and editor
+callbacks execute in that context. In particular:
+.TP
+.B rejmerge_diff()
+Called with installed path $1, rejected path $2 and output temporary path $3.
+Write the difference to $3. The default uses diff -u.
+.TP
+.B rejmerge_merge()
+Called with the same three arguments. Write the proposed merged result to $3.
+The default uses GNU diff group-format options and inserts conflict markers.
+The function may set REJMERGE_MERGE_INFO to text displayed after the merge.
+.PP
+Example override using explicitly quoted pathnames:
+.PP
+.nf
+rejmerge_diff() {
+        diff -u "$1" "$2" > "$3"
+}
+.fi
+.SH ENVIRONMENT
+.TP
+.B EDITOR
+Editor command, with optional whitespace-separated arguments, used on the
+proposed merge. Default: vi. The value is split into command arguments, not
+evaluated as shell syntax.
+.SH DEPENDENCIES
+Requires Bash, mktemp, file, standard shell utilities, a pager named more
+and the selected editor. GNU diffutils is required for the default merge
+format. Metadata handling requires GNU or BusyBox stat with -L and -c support;
+POSIX stat portability is not claimed. BusyBox alone is insufficient.
+.SH SAFETY
+This interactive command uses ordinary pathname-based operations, not the
+C installer's root-scoped descriptor API. An alternate root is not a sandbox
+or a security boundary against concurrent pathname replacement or symlink
+changes. Only operate on trusted, controlled trees and trusted configuration.
+Do not assume installer lookup guarantees apply to rejmerge.
+.PP
+Choices mutate files immediately; there is no transaction or rollback.
+Interruption can leave earlier choices applied. Inspect installed ownership,
+permissions and content after merging, especially for special files and links.
+Compatibility with every configuration override and terminal environment
+has not been established.
+.SH EXIT STATUS
+Normally zero after the interactive walk completes, nonzero for reported
+argument, dependency, I/O or interruption failures. Configuration overrides
+can change behavior and status. A completed walk does not imply that all
+rejected files were accepted; skipped files remain for another run.
+.SH FILES
+.TP
+.I /etc/rejmerge.conf
+Trusted executable configuration, relative to the selected root.
+.TP
+.I /var/lib/pkg/rejected/
+Rejected package entries, relative to the selected root.
+.SH SEE ALSO
+.BR pkgadd (8),
+.BR pkgrm (8),
+.BR pkginfo (8),
+.BR pkgmk (8),
+.BR diff (1),
+.BR bash (1)
+.SH COPYRIGHT
+Adapted from pkgutils documentation, copyright (c) 2000-2005 Per Liden and
+(c) 2006-2021 CRUX team. This imai adaptation is distributed under the GNU
+General Public License, version 3 or later. See LICENSE.

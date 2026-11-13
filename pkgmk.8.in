@@ -1,0 +1,195 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH PKGMK 8 "" "imai #VERSION#" "System Administration"
+.SH NAME
+pkgmk \- build a CRUX software package
+.SH SYNOPSIS
+.B pkgmk
+.RI [ options ]
+.SH DESCRIPTION
+.B pkgmk
+builds a package from Pkgfile in the current directory. It checks source files,
+unpacks them, invokes build(), strips eligible outputs unless disabled,
+creates an archive and checks its footprint. The resulting filename is
+.IR name # version - release .pkg.tar. compression .
+Source and package modification times determine whether a rebuild is needed.
+.PP
+The C executable drives option parsing and the build lifecycle through an
+embedded Bash compatibility controller. Bash evaluates the Pkgfile and
+executable configuration in a persistent context, preserving Bash arrays and
+function overrides. Downloads, recipe execution and packaging use Bash
+callbacks. Command-line options are parsed first, then
+Pkgfile and the selected configuration are sourced in that order. Recipe or
+configuration assignments can therefore override command-line settings.
+These files are trusted executable code, not passive data. Root builds remain
+supported and are not sandboxed.
+.SH OPTIONS
+.TP
+.BR \-i ", " \-\-install
+Run pkgadd after a successful build.
+.TP
+.BR \-u ", " \-\-upgrade
+Run pkgadd with its upgrade option after a successful build.
+.TP
+.BR \-r ", " \-\-recursive
+Find Pkgfiles recursively and build each port. The recursive driver retains
+legacy zero status even if an individual child build fails; inspect its output.
+.TP
+.BR \-d ", " \-\-download
+Download missing remote sources.
+.TP
+.BR \-do ", " \-\-download-only
+Download missing sources without building.
+.TP
+.BR \-eo ", " \-\-extract-only
+Extract sources without building.
+.TP
+.BR \-utd ", " \-\-up-to-date
+Only check whether the package is up to date.
+.TP
+.BR \-uf ", " \-\-update-footprint
+Update .footprint from the last built package.
+.TP
+.BR \-if ", " \-\-ignore-footprint
+Do not check the built package's footprint.
+.TP
+.BR \-in ", " \-\-ignore-new
+Ignore added files when checking a footprint; missing or changed entries
+still matter.
+.TP
+.BR \-um ", " \-\-update-md5sum
+Update .md5sum using current sources.
+.TP
+.BR \-im ", " \-\-ignore-md5sum
+Disable legacy MD5 checking.
+.TP
+.BR \-cm ", " \-\-check-md5sum
+Check MD5 sums without building.
+.TP
+.BR \-us ", " \-\-update-signature
+Update the port signature and SHA256 sums.
+.TP
+.BR \-cs ", " \-\-check-signature
+Check the port signature and SHA256 sums without building.
+.TP
+.BR \-is ", " \-\-ignore-signature
+Disable port signature checking.
+.TP
+.BR \-rs ", " \-\-refresh-signature
+Sign existing checksums without regenerating them.
+.TP
+.BR \-sk ", " \-\-secret-key " " file
+Use this signing key instead of /etc/ports/repository.sec, where repository
+is the port directory's parent name.
+.TP
+.BR \-pk ", " \-\-public-key " " file
+Use this verification key instead of /etc/ports/repository.pub.
+.TP
+.BR \-ns ", " \-\-no-strip
+Do not strip executable binaries or libraries.
+.TP
+.BR \-f ", " \-\-force
+Build even when the package appears up to date.
+.TP
+.BR \-c ", " \-\-clean
+Remove the built package and downloaded sources.
+.TP
+.BR \-kw ", " \-\-keep-work
+Retain the temporary working directory.
+.TP
+.BR \-cf ", " \-\-config-file " " file
+Read this configuration instead of /etc/pkgmk.conf.
+.TP
+.BR \-v ", " \-\-version
+Print the invoked command name, imai identity and version, then exit.
+.TP
+.BR \-h ", " \-\-help
+Print help and exit.
+.SH DEPENDENCIES
+Both dash and Bash are required, along with standard shell utilities and
+mktemp. Archive creation and extraction use bsdtar with the selected codec.
+MD5 and SHA256 generation normally use native digest operations. Source names
+containing backslashes, newlines or carriage returns use md5sum or sha256sum
+to retain the selected utility's filename encoding. Recipe digest calls with
+options also use the external utility. Signing and verification use
+.I /usr/bin/signify
+when requested. Downloads use curl by default. Set PKGMK_DOWNLOAD_PROG to
+wget for GNU-compatible wget, wget2 for GNU Wget2, or aria2c for aria2.
+BusyBox wget is explicitly rejected. Additional options use PKGMK_CURL_OPTS,
+PKGMK_WGET_OPTS, PKGMK_WGET2_OPTS or PKGMK_ARIA2_OPTS, respectively.
+Aria2c defaults to 4 connections per server, 4 splits, a 20 MiB minimum split
+size, 15-second connection timeout and 60-second timeout, with 3 attempts
+and a 3-second retry delay. It does not load aria2.conf. Wget2 supports HTTP and HTTPS, not FTP.
+Wget2 partial downloads require an HTTP 206 response to resume; an ignored
+range or a failed resume discards the partial file and retries from the start.
+Failed downloads are never renamed to the final source filename.
+Stripping uses file and binutils strip; manpage compression uses gzip.
+Builds additionally need all tools invoked by the port.
+BusyBox alone is not a complete build environment and does not supply all of
+these specialized dependencies.
+.SH FILES
+.TP
+.I Pkgfile
+Trusted Bash package recipe; see pkgfile(5).
+.TP
+.I /etc/pkgmk.conf
+Trusted Bash global configuration; see pkgmk.conf(5).
+.TP
+.I .footprint
+Expected package inventory and metadata.
+.TP
+.I .md5sum
+Legacy source checksums; MD5 does not establish authenticity.
+.TP
+.I .signature
+Port signature and SHA256 sums. Port signatures are distinct from binary
+package authentication; pkgadd accepts unsigned local packages.
+.TP
+.I .nostrip
+Patterns selecting outputs not to strip.
+.SH EXIT STATUS
+The nonrecursive workflow uses these codes. Executable recipes or configuration
+can explicitly exit with other statuses; Bash error handling also has its
+normal conditional-command exceptions.
+.TP
+.B 0
+Completed successfully, subject to the recursive-driver caveat above.
+.TP
+.B 1
+General error, including footprint mismatch, build function failure and
+installation via pkgadd failure, matching the legacy implementation.
+A zero pkgadd status does not prove that every file was installed; see pkgadd(8).
+.TP
+.B 2
+Invalid Pkgfile.
+.TP
+.B 3
+Missing or inaccessible source, package or work directory.
+.TP
+.B 4
+Source download failure.
+.TP
+.B 5
+Source unpacking failure.
+.TP
+.B 6
+MD5 mismatch.
+.TP
+.B 10
+Signature or signature-checksum failure.
+.SH LIMITATIONS
+Broad recipe compatibility and full package-corpus coverage have not been
+established. Do not run untrusted recipes or treat the work directory as a
+security boundary.
+.SH SEE ALSO
+.BR pkgfile (5),
+.BR pkgmk.conf (5),
+.BR pkgadd (8),
+.BR pkginfo (8),
+.BR pkgrm (8),
+.BR rejmerge (8),
+.BR bash (1),
+.BR signify (1)
+.SH COPYRIGHT
+Adapted from pkgutils documentation, copyright (c) 2000-2005 Per Liden and
+(c) 2006-2021 CRUX team. This imai adaptation is distributed under the GNU
+General Public License, version 3 or later. See LICENSE.

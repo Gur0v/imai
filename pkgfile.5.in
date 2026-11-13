@@ -1,0 +1,121 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH PKGFILE 5 "" "imai #VERSION#" "File Formats"
+.SH NAME
+Pkgfile \- trusted Bash recipe for a CRUX software package
+.SH DESCRIPTION
+.BR pkgmk (8)
+reads Pkgfile from the port directory. The recipe describes source files and
+how to stage a package. This is the CRUX Pkgfile interface, not an Arch
+PKGBUILD interface or a replacement POSIX recipe language.
+.PP
+The C executable launches a persistent Bash controller. Defaults are initialized,
+command-line options are parsed, then Pkgfile and the selected pkgmk.conf are
+sourced in that order. Recipe or configuration assignments can override
+command-line settings. Bash arrays, functions and configuration overrides
+remain available in the same controller context. The build function runs in
+a subshell with Bash errexit and command tracing enabled; changes made there
+do not propagate back into the controller. Bash's normal exceptions to errexit
+apply; it is not a substitute for explicit error handling where required.
+.SH DEFINITIONS
+.TP
+.B name
+Package name, conventionally lowercase and equal to the port directory name.
+.TP
+.B version
+Upstream version string.
+.TP
+.B release
+Port packaging revision, normally starting at 1.
+.TP
+.B source
+Bash array of remote URLs and local source filenames. Remote sources are
+stored in PKGMK_SOURCE_DIR. Recognized archives are extracted with bsdtar;
+other files are copied into SRC.
+.TP
+.B renames
+Optional Bash array aligned with source. Each element gives a downloaded
+source's local name, or SKIP to retain its original name. Avoid relying on
+renamed archive filenames in build(): extraction contents do not change.
+.TP
+.B build()
+Required Bash function that compiles the sources and stages the installed
+files below PKG. It must not install directly into the running system.
+.SH BUILD VARIABLES
+.TP
+.B SRC
+Source working directory. Use it to access unpacked sources and local files.
+.TP
+.B PKG
+Staging root for package contents. Use quoted expansions when passing it to
+commands, for example make DESTDIR="$PKG" install.
+.PP
+Recipes can inspect configuration variables when build() executes. Because
+configuration is sourced after Pkgfile, a top-level recipe expression does not
+yet see later configuration assignments. Recipes and configuration can override
+controller functions, but unnecessary private variable names risk collisions
+with future pkgmk internals.
+.SH EXAMPLE
+.nf
+# Description: Example library
+# URL: https://example.invalid/library
+# Maintainer: Port maintainer
+# Depends on: otherlib
+
+name=examplelib
+version=1.2.3
+release=1
+source=(https://example.invalid/$name-$version.tar.gz
+        fix.patch)
+
+build() {
+        cd "$name-$version"
+        patch -p1 < "$SRC/fix.patch"
+        ./configure --prefix=/usr
+        make
+        make DESTDIR="$PKG" install
+}
+.fi
+.PP
+Header comments are conventions consumed by other CRUX ports tools. pkgmk
+does not resolve or install dependencies from the Depends on field.
+For distribution policy, consult the current CRUX port guidelines rather than
+treating policy recommendations as parser requirements.
+.SH SAFETY
+The entire recipe and executable configuration are trusted code, including
+top-level statements before build(). They run with the caller's privileges;
+root builds are supported and are not sandboxed. Source extraction and build
+tools can also execute code. Neither PKG staging nor signatures turn an
+untrusted recipe into safe input.
+.PP
+A footprint records expected archive layout and metadata, not package
+authenticity or complete reproducibility. Binary packages installed by pkgadd
+remain unsigned local input under the pkgutils trust model.
+.SH FILES
+.TP
+.I Pkgfile
+Package recipe in the port directory.
+.TP
+.I .footprint
+Expected package footprint.
+.TP
+.I .md5sum
+Legacy source checksums.
+.TP
+.I .signature
+Port signature and SHA256 sums.
+.TP
+.I /etc/pkgmk.conf
+Executable build configuration.
+.SH SEE ALSO
+.BR pkgmk.conf (5),
+.BR pkgmk (8),
+.BR pkgadd (8),
+.BR bash (1)
+.PP
+CRUX port guidelines: https://crux.nu/Main/PortGuidelines
+.SH COPYRIGHT
+Adapted from the Pkgfile manual, (C) 2018 Fun, updated 2021 by John McQuah
+(jmcquah at disroot dot org), and pkgutils documentation, copyright (c)
+2000-2005 Per Liden and (c) 2006-2021 CRUX team.
+This imai adaptation is distributed under the GNU General Public License,
+version 3 or later. See LICENSE.

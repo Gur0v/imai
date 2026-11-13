@@ -1,0 +1,101 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH PKGMK.CONF 5 "" "imai #VERSION#" "File Formats"
+.SH NAME
+pkgmk.conf \- executable configuration for pkgmk
+.SH DESCRIPTION
+.B pkgmk
+parses command-line options first, then sources the current directory's Pkgfile
+followed by /etc/pkgmk.conf. Recipe and configuration assignments can override
+command-line settings; for example, PKGMK_NO_STRIP=no in configuration overrides
+\-ns. An alternative configuration file is selected with
+.BR "pkgmk \-cf" .
+Assignments, arrays, shell functions and other Bash syntax are supported.
+Configuration is trusted executable Bash running with the caller's privileges,
+including root; it is not sandboxed. Shell state and function overrides persist
+through the build controller. See pkgfile(5) for the recipe boundary.
+.SH VARIABLES
+Defaults below are internal defaults before the recipe and configuration run.
+The shipped configuration additionally exports CFLAGS and CXXFLAGS with
+-O2 -march=x86-64 -pipe. Compiler flags do not establish support for untested
+architectures.
+.TP
+.B CFLAGS, CXXFLAGS, LDFLAGS
+Export compiler and linker flags for build tools that honor them.
+.TP
+.B JOBS, MAKEFLAGS
+Optional parallel-build settings. JOBS alone has no universal effect; set
+MAKEFLAGS or use JOBS in the recipe as needed.
+.TP
+.B PKGMK_SOURCE_MIRRORS
+Bash array of source mirror URLs, tried in order before the original URL.
+Default: empty array.
+.TP
+.B PKGMK_SOURCE_DIR
+Directory for downloaded sources. Default: directory of Pkgfile.
+.TP
+.B PKGMK_PACKAGE_DIR
+Directory for built packages. Default: directory of Pkgfile.
+.TP
+.B PKGMK_WORK_DIR
+Working directory containing src and pkg staging directories.
+Default: work below the directory of Pkgfile. Configure only a directory
+whose contents may be removed by pkgmk.
+.TP
+.B PKGMK_DOWNLOAD_PROG
+Downloader: curl (default), GNU-compatible wget, wget2 or aria2c.
+Aria2c defaults to 4 connections per server, 4 splits, a 20 MiB minimum split
+size, 15-second connection timeout and 60-second timeout, with 3 attempts
+and a 3-second retry delay. It does not load aria2.conf.
+BusyBox wget is explicitly rejected because it lacks required options.
+Wget2 supports HTTP and HTTPS, not FTP. Its partial downloads require an
+HTTP 206 response to resume; otherwise the partial is discarded and the
+original URL is retried from the start.
+.TP
+.B PKGMK_CURL_OPTS, PKGMK_WGET_OPTS, PKGMK_WGET2_OPTS, PKGMK_ARIA2_OPTS
+Additional arguments for the corresponding downloader, split on shell whitespace
+without globbing. Embedded quote characters are not reinterpreted as shell
+quoting. Default: empty.
+.TP
+.B PKGMK_DOWNLOAD
+Set to yes to download missing remote sources. Default: no.
+.TP
+.B PKGMK_IGNORE_SIGNATURE
+Set to yes to disable port signature checks. Default: no.
+If a signature is absent, the ordinary workflow can fall back to legacy MD5
+checking; absence is not authenticated provenance.
+.TP
+.B PKGMK_IGNORE_MD5SUM
+Set to yes to disable legacy MD5 checks. Default: no.
+.TP
+.B PKGMK_IGNORE_FOOTPRINT
+Set to yes to disable footprint checks. Default: no.
+.TP
+.B PKGMK_IGNORE_NEW
+Set to yes to tolerate new footprint entries. Default: no.
+.TP
+.B PKGMK_NO_STRIP
+Set to yes to retain unstripped binaries and libraries. Default: no.
+.TP
+.B PKGMK_COMPRESSION_MODE
+Package compression: gz (default), bz2, xz, lz or zst. Requires bsdtar
+support for the selected codec.
+.SH EXAMPLES
+.nf
+export CFLAGS='-O2 -march=x86-64 -pipe'
+export CXXFLAGS="$CFLAGS"
+export MAKEFLAGS='-j2'
+PKGMK_SOURCE_MIRRORS=(https://mirror.example.invalid/sources)
+PKGMK_COMPRESSION_MODE=zst
+.fi
+.SH FILES
+.TP
+.I /etc/pkgmk.conf
+Default global build configuration.
+.SH SEE ALSO
+.BR pkgfile (5),
+.BR pkgmk (8),
+.BR bash (1)
+.SH COPYRIGHT
+Adapted from pkgutils documentation, copyright (c) 2000-2005 Per Liden and
+(c) 2006-2021 CRUX team. This imai adaptation is distributed under the GNU
+General Public License, version 3 or later. See LICENSE.
