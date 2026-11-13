@@ -1,0 +1,69 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH PKGINFO 8 "" "imai #VERSION#" "System Administration"
+.SH NAME
+pkginfo \- display CRUX package information
+.SH SYNOPSIS
+.B pkginfo
+.RI [ \-r " root" ] " mode"
+.SH DESCRIPTION
+.B pkginfo
+queries the installed package database or a package archive without modifying
+packages. Specify exactly one query mode; repeated mode options are errors.
+.SH QUERY MODES
+.TP
+.BR \-i ", " \-\-installed
+List installed package names and versions in package-name order.
+.TP
+.BR \-l ", " \-\-list " " package|file
+List the inventory of an installed package or members of an existing package
+archive. An installed package name takes precedence over a filesystem pathname
+of the same spelling. If no package name matches, an existing pathname selects
+archive inspection. This mode opens the installed database even for an archive;
+unlike footprint mode, it therefore requires an accessible database.
+.TP
+.BR \-o ", " \-\-owner " " pattern
+List owners of installed files matching a POSIX extended regular expression.
+Matching uses inventory names prefixed with /; displayed file names retain
+their stored spelling. No match prints a message and returns zero.
+.TP
+.BR \-f ", " \-\-footprint " " file
+Print the archive footprint, including file types, permissions, ownership,
+names and link or device information. This output is consumed by
+.BR pkgmk (8).
+No installed database is required for this mode.
+.SH OPTIONS
+.TP
+.BR \-r ", " \-\-root " " path
+Select the package database under another system's root instead of /.
+Archive arguments are still interpreted in the caller's filesystem.
+.TP
+.BR \-v ", " \-\-version
+Print the invoked command name, imai identity and version, then exit.
+.TP
+.BR \-h ", " \-\-help
+Print help and exit.
+.SH ARCHIVE VALIDATION
+Supported package compression formats are gzip, bzip2, xz, lzip and zstd.
+The complete compression stream and tar payload are consumed before query
+output is printed. Damaged input fails without partial archive-query output,
+a deliberate difference from legacy header-error handling.
+Decoded temporary streams require disk space; checksums detect some corruption
+but do not authenticate packages. Checksums cannot detect all alterations in
+formats that omit them.
+.SH EXIT STATUS
+Zero indicates successful completion, including an owner query with no matches.
+Invalid arguments, invalid regular expressions, database or archive errors,
+and output errors return nonzero.
+.SH FILES
+.TP
+.I /var/lib/pkg/db
+Plain-text package database; queries hold a shared directory lock.
+.SH SEE ALSO
+.BR pkgadd (8),
+.BR pkgrm (8),
+.BR pkgmk (8),
+.BR rejmerge (8)
+.SH COPYRIGHT
+Adapted from pkgutils documentation, copyright (c) 2000-2005 Per Liden and
+(c) 2006-2021 CRUX team. This imai adaptation is distributed under the GNU
+General Public License, version 3 or later. See LICENSE.

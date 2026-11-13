@@ -1,0 +1,76 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH PKGRM 8 "" "imai #VERSION#" "System Administration"
+.SH NAME
+pkgrm \- remove an installed CRUX software package
+.SH SYNOPSIS
+.B pkgrm
+.RI [ options ] " package"
+.SH DESCRIPTION
+.B pkgrm
+removes a package by its installed name, not by an archive filename.
+Root privileges are required. Files owned by another package under the exact
+same inventory spelling are retained. Directories are removed only if empty.
+Final symlinks are unlinked rather than followed.
+.SH OPTIONS
+.TP
+.BR \-r ", " \-\-root " " path
+Select another system's root filesystem and package database instead of /.
+This is not a package relocation option or a sandbox.
+.TP
+.BR \-v ", " \-\-version
+Print the invoked command name, imai identity and version, then exit.
+.TP
+.BR \-h ", " \-\-help
+Print help and exit.
+.SH OPERATION
+The database directory is exclusively locked through removal and database
+finalization. Paths are removed in reverse inventory order. Shared ownership
+uses original strings, not canonical filesystem identities: distinct spellings
+of the same filesystem path are not treated as shared ownership.
+The host /sbin/ldconfig helper is run for the selected root when etc/ld.so.conf
+exists; its nonzero exit status is ignored for pkgutils compatibility.
+Helper setup, execution or wait failures return failure without skipping
+best-effort database finalization. Unlike the corresponding pkgutils failure
+paths, these failures do not deliberately leave the original package record
+after file removal. Database write failures are still possible and reported.
+.PP
+All selected inventory names are checked before mutation. Empty or absolute
+names and parent traversal components are rejected. Required Linux root-scoped
+lookup protections have no weaker fallback; magic-link traversal is refused.
+The final database file may not be a symlink for mutation.
+.PP
+Selected objects remain within the operation's authority even if another
+process subsequently relocates them outside the pinned root. This is not a
+promise of continuous structural containment. See
+.BR pkgadd (8)
+for the installation trust model and verification limitations.
+.PP
+Removal is nontransactional. Catchable HUP, INT, QUIT and TERM requests during
+mutation are deferred until best-effort completion and database finalization,
+then reported without changing the settled operation result. This is not
+rollback; SIGKILL, crashes and power loss cannot be deferred.
+.SH EXIT STATUS
+Zero preserves the legacy result policy, including after individual file
+removal failures. For example, a nonempty directory can remain while the
+package record is removed and the command returns zero. Read diagnostics;
+status zero does not prove complete removal. Argument, lookup-protection,
+preflight and database errors normally return nonzero.
+.SH FILES
+.TP
+.I /var/lib/pkg/db
+Package database under the selected root.
+.TP
+.I /var/lib/pkg/db.backup
+Previous database snapshot.
+.TP
+.I /var/lib/pkg/db.incomplete_transaction
+Intermediate database output, potentially partial after failure.
+.SH SEE ALSO
+.BR pkgadd (8),
+.BR pkginfo (8),
+.BR pkgmk (8),
+.BR rejmerge (8)
+.SH COPYRIGHT
+Adapted from pkgutils documentation, copyright (c) 2000-2005 Per Liden and
+(c) 2006-2021 CRUX team. This imai adaptation is distributed under the GNU
+General Public License, version 3 or later. See LICENSE.

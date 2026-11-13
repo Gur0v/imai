@@ -1,0 +1,155 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.TH PKGADD 8 "" "imai #VERSION#" "System Administration"
+.SH NAME
+pkgadd \- install a CRUX software package
+.SH SYNOPSIS
+.B pkgadd
+.RI [ options ] " file"
+.SH DESCRIPTION
+.B pkgadd
+installs a package archive and records its name, version and file inventory
+in the package database. Root privileges are required.
+Package filenames have the form
+.IR name # version - release .pkg.tar. compression ,
+where compression is gz, bz2, xz, lz or zst.
+Dependencies are not resolved automatically.
+.SH OPTIONS
+.TP
+.BR \-u ", " \-\-upgrade
+Replace an installed package of the same name. Without this option,
+installing an already installed package is an error.
+.TP
+.BR \-f ", " \-\-force
+Overwrite conflicting files and remove their ownership from other package
+records. Use with care; this can damage other installed packages.
+.TP
+.BR \-r ", " \-\-root " " path
+Use an alternative installation root and its package database instead of
+.IR / .
+This is for another system's root filesystem, not for relocating a package
+from /usr to /usr/local. The archive pathname remains relative to the caller.
+.TP
+.BR \-c ", " \-\-config " " file
+Read an alternative configuration file. This explicit pathname is interpreted
+in the caller's filesystem, not relative to the installation root.
+.TP
+.BR \-v ", " \-\-version
+Print the invoked command name, imai identity and version, then exit.
+.TP
+.BR \-h ", " \-\-help
+Print help and exit.
+.SH CONFIGURATION
+The default configuration is
+.I /etc/pkgadd.conf
+under the selected installation root. Each nonempty rule has exactly three
+whitespace-separated tokens:
+.PP
+.RS
+.I event pattern action
+.RE
+.PP
+Events are case-sensitive
+.B INSTALL
+and
+.BR UPGRADE ;
+actions are
+.B YES
+and
+.BR NO .
+Patterns are POSIX extended regular expressions matched against the original
+archive member names, normally without an initial slash.
+.B INSTALL
+rules apply to all installations;
+.B INSTALL NO
+excludes a member from installation and the new inventory.
+.B UPGRADE
+rules control replacement during upgrades. The default is YES for both events.
+The last matching rule of the relevant event takes precedence.
+.PP
+.nf
+UPGRADE ^etc/.*$ NO
+UPGRADE ^var/log/.*$ NO
+UPGRADE ^etc/X11/.*$ YES
+.fi
+.PP
+This preserves existing files below etc and var/log except below etc/X11.
+An incoming file that must not replace an existing file is routed to
+.I /var/lib/pkg/rejected/
+under the selected root for manual examination with
+.BR rejmerge (8).
+Identical rejected copies may be discarded.
+.PP
+A comment must begin with # in the first column. Inline comments and extra
+tokens are not accepted. Lines reaching the parser's 1024-byte limit are
+rejected. Regular expressions are compiled when considered, so an invalid
+pattern superseded by a higher-priority match need not be diagnosed.
+Missing or unopenable configuration files are silently ignored, as in
+pkgutils. A stream read error aborts before mutation rather than using a
+partially read configuration.
+.SH SAFETY AND COMPATIBILITY
+Packages are unsigned local input and are not authenticated by pkgadd.
+Only install packages from publishers trusted with system-wide installation
+authority. Archive checks do not make installed software safe.
+.PP
+imai validates and retains the decoded archive before extraction, requiring
+temporary disk space. Absolute member names and names containing parent
+traversal components are rejected, including hardlink targets. Harmless dot
+components and repeated separators are accepted; original inventory spellings
+remain significant for ownership and configuration rules.
+Package names, versions and member names containing a newline are rejected
+before mutation because the plain-text database cannot represent them without
+changing record boundaries.
+.PP
+Privileged lookups use Linux root-scoped resolution with magic links refused;
+required protections have no weaker fallback. Symlink contents may be absolute
+or contain parent components, with lookups scoped to the selected root.
+Authority over selected objects can persist after another process relocates
+them outside that root. Continuous structural containment is not promised.
+An alternative root is not a sandbox. The host
+.I /sbin/ldconfig
+helper may be invoked for the selected root when etc/ld.so.conf exists.
+.PP
+Updates are nontransactional. Once mutation starts, catchable HUP, INT, QUIT
+and TERM requests are deferred until best-effort completion and database
+finalization, then reported. This is not rollback and does not protect
+against SIGKILL, crashes or power loss.
+.PP
+Helper setup, execution or wait failures are reported as failures, but do not
+skip best-effort database finalization after mutation. This differs from
+pkgutils failure paths that can leave the original database after changing files.
+A helper that runs and exits nonzero retains the legacy ignored-exit policy.
+.SH EXIT STATUS
+Zero retains pkgutils compatibility and is not proof that every file was
+installed successfully. In particular, an upgrade may report extraction errors
+and still finalize its database with status zero. A fresh extraction failure
+attempts cleanup and reports failure. Inspect diagnostics and verify important
+files. Argument, preflight and database errors normally return nonzero.
+.SH FILES
+.TP
+.I /etc/pkgadd.conf
+Default installation rules.
+.TP
+.I /var/lib/pkg/db
+Plain-text package database; the database directory is locked during access.
+.TP
+.I /var/lib/pkg/db.backup
+Previous database snapshot.
+.TP
+.I /var/lib/pkg/db.incomplete_transaction
+Intermediate database output; a file left after failure may be partial.
+.TP
+.I /var/lib/pkg/rejected/
+Incoming files preserved for manual merging.
+.SH LIMITATIONS
+Complete package-corpus mutation compatibility is not established. Runtime
+tests have used Linux 6.18.62 on x86-64; minimum-kernel runtime compatibility
+has not been verified. Required lookup protections are checked at runtime.
+.SH SEE ALSO
+.BR pkgrm (8),
+.BR pkginfo (8),
+.BR pkgmk (8),
+.BR rejmerge (8)
+.SH COPYRIGHT
+Adapted from pkgutils documentation, copyright (c) 2000-2005 Per Liden and
+(c) 2006-2021 CRUX team. This imai adaptation is distributed under the GNU
+General Public License, version 3 or later. See LICENSE for the license text.
