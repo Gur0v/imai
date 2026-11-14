@@ -1,31 +1,24 @@
 # imai
 
-A C23 replacement for CRUX pkgutils: `pkgadd`, `pkgrm`, `pkginfo`,
-`pkgmk` and `rejmerge`. Supports existing CRUX packages, databases,
-Pkgfiles and configuration files. The latter two commands require Bash.
+imai is a drop-in replacement for CRUX pkgutils, written in C23.
+It provides pkgadd, pkgrm, pkginfo, pkgmk and rejmerge and supports
+existing CRUX packages, databases, Pkgfiles and configuration files.
+pkgmk and rejmerge require Bash.
 
-## Features
+pkgmk adds optional recipe logs, build timing and tmpfs builds.
+See the manuals for configuration, compatibility details and runtime dependencies.
 
-- Full archive validation and destination preflight before installation.
-- Root-scoped filesystem operations for package installation and removal.
-- Optional tmpfs builds through `PKGMK_TMPFS="yes"` in pkgmk.conf.
-- curl, wget, Wget2 and aria2 download backends.
+## Build
 
-See the manuals for configuration and compatibility details.
+Tested on Linux x86-64 with GCC 14.4 and glibc 2.40.
+Requires make, dash, pkg-config, libarchive, libcrypto and their
+static dependencies.
 
-## Building and installing
+    make
+    make DESTDIR=/some/other/path install
 
-Tested on Linux x86-64 with GCC 14.4 and glibc 2.40. Build dependencies:
-make, dash, pkg-config, libarchive, libcrypto and their static dependencies.
-
-```sh
-make
-make DESTDIR=/some/other/path install
-```
-
-Omit `DESTDIR` for host installation; back up `/etc/pkgadd.conf`,
-`/etc/pkgmk.conf` and `/etc/rejmerge.conf` first, as installation overwrites them.
-See the manuals for usage, runtime dependencies and limitations.
+Omit DESTDIR for host installation. Back up /etc/pkgadd.conf,
+/etc/pkgmk.conf and /etc/rejmerge.conf first; installation overwrites them.
 
 ## License
 
