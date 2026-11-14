@@ -95,6 +95,19 @@ internal(int argc, char **argv)
 {
 	struct stat st;
 
+	if (argc == 5 && strcmp(argv[0], "check-capture") == 0) {
+		for (int i = 0; i < 2; i++) {
+			int flags = fcntl(61 + i, F_GETFL);
+			if (flags < 0 || (flags & O_ACCMODE) == O_RDONLY ||
+			    fstat(61 + i, &st) < 0 || !S_ISFIFO(st.st_mode) ||
+			    (unsigned long long)st.st_dev !=
+			        strtoull(argv[1 + i * 2], NULL, 10) ||
+			    (unsigned long long)st.st_ino !=
+			        strtoull(argv[2 + i * 2], NULL, 10))
+				return 1;
+		}
+		return 0;
+	}
 	if (argc >= 2 && strcmp(argv[0], "digest") == 0) {
 		const EVP_MD *algorithm;
 		const char *command;

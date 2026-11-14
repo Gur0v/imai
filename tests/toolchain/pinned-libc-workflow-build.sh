@@ -72,7 +72,7 @@ for command in pkgmk rejmerge; do
             set -- -I"$crypto/include"
         fi
         "$cc" "$@" --sysroot="$sysroot" -B"$sysroot/usr/lib/" -std=c23 \
-            -D_POSIX_C_SOURCE=200809L -DVERSION=\"0.1.1\" -O2 \
+            -D_POSIX_C_SOURCE=200809L -DVERSION=\"0.1.2\" -O2 \
             -Wall -Wextra -Wpedantic -Wformat=2 \
             -Werror=implicit-function-declaration -fstack-protector-strong \
             -fstack-clash-protection -D_FORTIFY_SOURCE=3 -iquote src -iquote "$work" \
@@ -134,6 +134,8 @@ for command in pkgmk rejmerge; do
     openssl dgst -sha256 "$work/$command" >"$work/$command.sha256"
 done
 run_test pkgmk-native dash tests/pkgmk/native-boundary-regressions.sh "$work/pkgmk"
+run_test pkgmk-observation dash tests/pkgmk/recipe-observation.sh "$work/pkgmk"
+run_test pkgmk-managed dash tests/pkgmk/managed-tmpfs.sh "$work/pkgmk"
 run_test rejmerge-native dash tests/rejmerge/native-boundary-regressions.sh "$work/rejmerge"
 run_test pkgmk-workflow dash tests/pkgmk/build-download-integration.sh "$root/../pkgutils/pkgmk.in" "$work/pkgmk"
 run_test rejmerge-workflow dash tests/rejmerge/menu-merge-integration.sh "$work/rejmerge"

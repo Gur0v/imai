@@ -6,8 +6,8 @@ command=${1:-$root/build/pkgmk}
 case $command in /*) ;; *) command=$PWD/$command ;; esac
 # Trusted executable configurations run only in the disposable filesystem.
 # shellcheck disable=SC2016
-bwrap --unshare-all --die-with-parent --ro-bind / / --dev /dev --proc /proc \
-    --tmpfs /tmp --ro-bind "$command" /tmp/pkgmk --chdir /tmp -- /bin/dash -eu -c '
+bwrap --unshare-all --die-with-parent --uid 0 --gid 0 --cap-add CAP_SYS_ADMIN --ro-bind / / --dev /dev --proc /proc \
+    --tmpfs /tmp --tmpfs /var --dir /var/tmp --ro-bind "$command" /tmp/pkgmk --chdir /tmp -- /bin/dash -eu -c '
 mkdir port
 cd port
 cat >Pkgfile <<"EOF"
@@ -125,7 +125,7 @@ PKGMK_TMPFS=yes
 PKGMK_IGNORE_SIGNATURE=yes
 PKGMK_IGNORE_MD5SUM=yes
 unpack_source() {
-    [[ $PKGMK_WORK_DIR == /tmp/imai-pkgmk.* && $PKGMK_WORK_DIR != "$PKGMK_ROOT/work" ]] || exit 98
+    [[ $PKGMK_WORK_DIR == /var/tmp/pkgmk/workflow && $PKGMK_WORK_DIR != "$PKGMK_ROOT/work" ]] || exit 98
     [[ $(stat -c %a "$PKGMK_WORK_DIR") == 700 ]] || exit 99
     printf "%s\n" "$PKGMK_WORK_DIR" >selected
 }
@@ -133,7 +133,8 @@ EOF
 /tmp/pkgmk -cf config -eo >out 2>err
 selected=$(cat selected)
 [ -d "$selected/src" ]
-rm -rf "$selected"
+umount "$selected"
+rmdir "$selected"
 cat >config <<"EOF"
 PKGMK_TMPFS=yes
 PKGMK_WORK_DIR="$PKGMK_ROOT/work"
@@ -142,7 +143,7 @@ PKGMK_IGNORE_MD5SUM=yes
 PKGMK_IGNORE_FOOTPRINT=yes
 PKGMK_NO_STRIP=yes
 build() {
-    [[ $PKGMK_WORK_DIR == /tmp/imai-pkgmk.* ]] || exit 98
+    [[ $PKGMK_WORK_DIR == /var/tmp/pkgmk/workflow ]] || exit 98
     [[ $PKGMK_SOURCE_DIR == "$PKGMK_ROOT" && $PKGMK_PACKAGE_DIR == "$PKGMK_ROOT" ]] || exit 99
     printf "%s\n" "$PKGMK_WORK_DIR" >"$PKGMK_ROOT/selected"
     printf "int main(void) { return 0; }\n" >probe.c
@@ -161,9 +162,12 @@ bsdtar -xOf workflow#1-1.pkg.tar.gz payload >payload
 selected=$(cat selected)
 [ -d "$selected/src" ]
 [ "$(stat -c %a "$selected")" = 700 ]
-rm -rf "$selected"
+umount "$selected"
+rmdir "$selected"
 printf "build() { false; }\n" >>config
 if /tmp/pkgmk -cf config -f >out 2>err; then exit 1; fi
+umount /var/tmp/pkgmk/workflow
+rmdir /var/tmp/pkgmk/workflow
 # No allocation in no-work mode, even with an unusable custom location.
 printf "PKGMK_WORK_DIR=/sys/absent/work\nbuild_needed() { printf no; }\n" >>config
 /tmp/pkgmk -cf config -utd >out 2>err
@@ -189,48 +193,15 @@ PKGMK_TMPFS=yes
 PKGMK_IGNORE_SIGNATURE=yes
 PKGMK_IGNORE_MD5SUM=yes
 unpack_source() {
-    local first=$PKGMK_WORK_DIR
     : >"$SRC/stale"
-    : >"$PKG/stale"
-    GLOBIGNORE=$PKGMK_WORK_DIR/pkg
-    set -f
-    shopt -s failglob
     make_work_dir
-    [[ $- == *f* && $GLOBIGNORE == "$PKGMK_WORK_DIR/pkg" ]] || exit 96
-    shopt -q failglob || exit 96
-    set +f
-    shopt -u failglob
-    unset GLOBIGNORE
-    [[ ! -e $PKG/stale ]] || exit 97
-    [[ $PKGMK_WORK_DIR == "$first" && ! -e $SRC/stale ]] || exit 98
-    [[ $(stat -c %a "$PKGMK_WORK_DIR") == 700 ]] || exit 99
-    remove_work_dir
-    make_work_dir
-    [[ $PKGMK_WORK_DIR != "$first" && $PKGMK_WORK_DIR == /tmp/imai-pkgmk.* ]] || exit 98
-    [[ $(stat -c %a "$PKGMK_WORK_DIR") == 700 ]] || exit 99
-    printf "%s\n" "$PKGMK_WORK_DIR" >selected
+    exit 98
 }
 EOF
-/tmp/pkgmk -cf config -eo >out 2>err
-selected=$(cat selected)
-[ -d "$selected/src" ]
-rm -rf "$selected"
-cat >config <<"EOF"
-set -e
-PKGMK_TMPFS=yes
-PKGMK_IGNORE_SIGNATURE=yes
-PKGMK_IGNORE_MD5SUM=yes
-info() {
-    case $1 in
-    *Using\ tmpfs*) printf "%s\n" "$PKGMK_WORK_DIR" >selected; return 1 ;;
-    esac
-}
-unpack_source() { printf "%s\n" "$PKGMK_WORK_DIR" >selected; }
-EOF
-/tmp/pkgmk -cf config -eo >out 2>err
-selected=$(cat selected)
-[ -d "$selected/src" ]
-rm -rf "$selected"
+if /tmp/pkgmk -cf config -eo >out 2>err; then exit 1; fi
+[ -f /var/tmp/pkgmk/workflow/src/stale ]
+umount /var/tmp/pkgmk/workflow
+rmdir /var/tmp/pkgmk/workflow
 printf "PKGMK_TMPFS=invalid\n" >config
 if /tmp/pkgmk -cf config -utd >out 2>err; then exit 1; fi
 grep -q PKGMK_TMPFS err
@@ -257,34 +228,6 @@ finally:
         p.wait()
 pathlib.Path("ready").unlink()
 pathlib.Path("selected").unlink(missing_ok=True)
-import os
-config.write_text("PKGMK_TMPFS=yes\nPKGMK_IGNORE_SIGNATURE=yes\nPKGMK_IGNORE_MD5SUM=yes\nunpack_source() { printf \\\"%s\\\\n\\\" \\\"$PKGMK_WORK_DIR\\\" >\\\"$PKGMK_ROOT/selected.$CASE\\\"; while [[ ! -e $PKGMK_ROOT/release.$CASE ]]; do sleep .01; done; }\n".replace("\\\"", "\""))
-workers = []
-try:
-    for case in ("a", "b"):
-        workers.append(subprocess.Popen(["/tmp/pkgmk", "-cf", "config", "-eo"], env=dict(os.environ, CASE=case), stdout=subprocess.PIPE, stderr=subprocess.PIPE))
-    deadline = time.monotonic() + 5
-    while not all(pathlib.Path("selected." + case).exists() for case in ("a", "b")):
-        assert time.monotonic() < deadline
-        time.sleep(.01)
-    paths = [pathlib.Path(pathlib.Path("selected." + case).read_text().strip()) for case in ("a", "b")]
-    assert paths[0] != paths[1]
-    assert all(path.is_dir() for path in paths)
-    pathlib.Path("release.a").touch()
-    out, err = workers[0].communicate(timeout=5)
-    assert workers[0].returncode == 0, (out, err)
-    import shutil
-    shutil.rmtree(paths[0])
-    assert paths[1].is_dir()
-    pathlib.Path("release.b").touch()
-    out, err = workers[1].communicate(timeout=5)
-    assert workers[1].returncode == 0, (out, err)
-    shutil.rmtree(paths[1])
-finally:
-    for worker in workers:
-        if worker.poll() is None:
-            worker.kill()
-            worker.wait()
 config.write_text("PKGMK_TMPFS=yes\nPKGMK_IGNORE_SIGNATURE=yes\nPKGMK_IGNORE_MD5SUM=yes\nbuild() { printf \"%s\\n\" \"$PKGMK_WORK_DIR\" >\"$PKGMK_ROOT/selected\"; : >\"$PKGMK_ROOT/ready\"; while :; do :; done; }\n")
 p = subprocess.Popen(["/tmp/pkgmk", "-cf", "config", "-f"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 try:
@@ -297,7 +240,7 @@ try:
     out, err = p.communicate(timeout=5)
     assert p.returncode == 1, (p.returncode, out, err)
     assert b"Interrupted." in err, err
-    assert not pathlib.Path(pathlib.Path("selected").read_text().strip()).exists()
+    assert pathlib.Path(pathlib.Path("selected").read_text().strip()).is_dir()
 finally:
     if p.poll() is None:
         p.kill()

@@ -3,7 +3,7 @@
 
 SHELL = /bin/dash
 CC = cc
-VERSION = 0.1.1
+VERSION = 0.1.2
 DESTDIR =
 BINDIR = /usr/bin
 ETCDIR = /etc
@@ -190,6 +190,8 @@ test-config: all
 test-pkgmk: all
 	dash tests/pkgmk/native-boundary-regressions.sh
 	dash tests/pkgmk/callback-state-regressions.sh
+	dash tests/pkgmk/recipe-observation.sh
+	dash tests/pkgmk/managed-tmpfs.sh
 	dash tests/pkgmk/build-download-integration.sh
 
 test-rejmerge: all

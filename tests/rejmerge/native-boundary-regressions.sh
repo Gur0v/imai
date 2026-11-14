@@ -58,6 +58,6 @@ CONF
 /tmp/rejmerge -r "$root" >/tmp/output
 [ "$(cat /tmp/chmod-override)" = 640 ]
 [ "$(cat /tmp/chown-override)" = 0:0 ]
-/tmp/rejmerge --version | grep -qx "rejmerge (imai) 0.1.1"
+/tmp/rejmerge --version | grep -qx "rejmerge (imai) 0.1.2"
 '
 printf 'PASS: native rejmerge ELF, metadata, permissions and standalone controller\n'

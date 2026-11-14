@@ -43,13 +43,42 @@ whose contents may be removed by pkgmk.
 .TP
 .B PKGMK_TMPFS
 Set to yes to require executable, writable tmpfs for work. Default: no.
-With the final PKGMK_WORK_DIR equal to the default, pkgmk lazily allocates
-and prints a private directory below /tmp; explicitly assigning the default
-has the same effect. A nondefault work path is honored and must be on tmpfs.
-No filesystem is mounted and there is no disk fallback. Source downloads,
-finished packages and TMPDIR remain unchanged. Keep-work and extract-only
-retain work as usual. Tmpfs can swap, fill up and disappear at reboot;
-this option is not a build sandbox or a capacity guarantee.
+With the final PKGMK_WORK_DIR equal to the default, pkgmk reserves
+/var/tmp/pkgmk/<recipe name> and mounts tmpfs there, containing src and pkg.
+Explicitly assigning the default has the same effect. The parent is created mode0700 when absent and must otherwise be a
+root-owned mode0700 directory; existing work directories are never adopted.
+Recipe names must be nonempty single path components other than dot or dot-dot.
+Successful packaging and footprint checks permit ordinary unmount and directory
+removal unless keep-work is selected. Failures, interruption and extract-only
+retain work and print its location. Busy mounts are retained with failure status;
+pkgmk never forces or lazily detaches them. Retained mounts require manual cleanup
+before rebuilding the same recipe. Mounting requires appropriate privileges.
+A nondefault work path retains the existing cleanup behavior and must be on tmpfs;
+pkgmk does not mount or unmount it. There is no disk fallback. Source downloads,
+finished packages and TMPDIR remain unchanged. Tmpfs can swap, fill up and
+disappear at reboot; this option is not a build sandbox or a capacity guarantee.
+.TP
+.B PKGMK_LOG_DIR
+Existing directory for a unique mode0600 recipe log. Empty by default (disabled).
+Relative paths are resolved against the original Pkgfile directory. Only the
+first recipe capture per controller is logged; nested and later captures warn
+and skip a separate log. Nested output can appear in the enclosing log.
+Ordinary recursive child processes have independent logs. The path is printed
+at capture start. Logs are retained without rotation, including incomplete logs.
+Setup and write failures warn and disable the sink without changing recipe status.
+Only the default build callback is captured, not downloads, extraction, stripping,
+packaging or installation. Configured callback replacements remain authoritative.
+Stdout and stderr remain live and separate; the log merges their observed bytes
+without guaranteeing cross-stream ordering. Logging uses pipes and can change
+application buffering, color and terminal detection. Logs include shell trace
+and can expose credentials. Capture ends at recipe completion; detached writers
+are not awaited and may encounter closed pipes at invocation exit.
+.TP
+.B PKGMK_BUILD_TIME
+Set to yes to report monotonic elapsed seconds for every recipe callback,
+including failures. Default: no. Independent of logging; other build phases and
+skipped builds are not timed. Clock or reporting failures must not change the
+recipe result. No timing history is retained.
 .TP
 .B PKGMK_DOWNLOAD_PROG
 Downloader: curl (default), GNU-compatible wget, wget2 or aria2c.

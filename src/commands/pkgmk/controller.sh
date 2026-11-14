@@ -295,7 +295,7 @@ unpack_source()
 
 		if ! "${COMMAND[@]}"; then
 			if [ "$PKGMK_KEEP_WORK" = "no" ]; then
-				rm -rf "$PKGMK_WORK_DIR"
+				native_work_discard
 			fi
 			error "Building '$TARGET' failed."
 			exit $E_UNPACK
@@ -365,7 +365,7 @@ check_md5sum()
 			cat "$FILE".md5sum.diff >&2
 
 			if [ "$PKGMK_KEEP_WORK" = "no" ]; then
-				rm -rf "$PKGMK_WORK_DIR"
+				native_work_discard
 			fi
 
 			if [ "$PKGMK_CHECK_MD5SUM" = "yes" ]; then
@@ -379,7 +379,7 @@ check_md5sum()
 	else
 		if [ "$PKGMK_CHECK_MD5SUM" = "yes" ]; then
 			if [ "$PKGMK_KEEP_WORK" = "no" ]; then
-				rm -rf "$PKGMK_WORK_DIR"
+				native_work_discard
 			fi
 			info "Md5sum not found."
 			exit $E_MD5
@@ -391,7 +391,7 @@ check_md5sum()
 
 	if [ "$PKGMK_CHECK_MD5SUM" = "yes" ]; then
 		if [ "$PKGMK_KEEP_WORK" = "no" ]; then
-			rm -rf "$PKGMK_WORK_DIR"
+			native_work_discard
 		fi
 		info "Md5sum ok."
 		exit 0
@@ -438,7 +438,7 @@ check_signature()
 			fi
 
 			if [ "$PKGMK_KEEP_WORK" = "no" ]; then
-				rm -rf "$PKGMK_WORK_DIR"
+				native_work_discard
 			fi
 
 			error "Building '$TARGET' failed."
@@ -451,7 +451,7 @@ check_signature()
 		fi
 		if [ "$PKGMK_CHECK_SIGNATURE" = "yes" ]; then
 			if [ "$PKGMK_KEEP_WORK" = "no" ]; then
-				rm -rf "$PKGMK_WORK_DIR"
+				native_work_discard
 			fi
 			info "Signature not found."
 			exit $E_SIGNATURE
@@ -464,7 +464,7 @@ check_signature()
 
 	if [ "$PKGMK_CHECK_SIGNATURE" = "yes" ]; then
 		if [ "$PKGMK_KEEP_WORK" = "no" ]; then
-			rm -rf "$PKGMK_WORK_DIR"
+			native_work_discard
 		fi
 		info "Signature ok."
 		exit 0
@@ -633,18 +633,7 @@ check_footprint()
 native_work_select()
 {
 	[[ $PKGMK_TMPFS == yes ]] || return 0
-	if [[ $PKGMK_WORK_DIR == "${__imai_tmpfs_work-}" && ! -d $PKGMK_WORK_DIR ]]; then
-		PKGMK_WORK_DIR=$PKGMK_ROOT/work
-	fi
-	if [[ $PKGMK_WORK_DIR == "$PKGMK_ROOT/work" ]]; then
-		"$PKGMK_NATIVE_COMMAND" --imai-internal check-tmpfs /tmp || exit 1
-		PKGMK_WORK_DIR=$(mktemp -d /tmp/imai-pkgmk.XXXXXXXX) || {
-			error "Cannot allocate tmpfs work directory."
-			exit 1
-		}
-		__imai_tmpfs_work=$PKGMK_WORK_DIR
-		builtin printf "=======> Using tmpfs work directory '%s'.\n" "$PKGMK_WORK_DIR" || native_work_failed
-	else
+	if ! native_rpc work-managed; then
 		"$PKGMK_NATIVE_COMMAND" --imai-internal check-tmpfs "$(dirname "$PKGMK_WORK_DIR")" || exit 1
 	fi
 	if [[ -e $PKGMK_WORK_DIR || -L $PKGMK_WORK_DIR ]]; then
@@ -654,25 +643,13 @@ native_work_select()
 
 native_work_failed()
 {
-	if [[ $PKGMK_KEEP_WORK == no && $PKGMK_WORK_DIR == "${__imai_tmpfs_work-}" ]]; then
-		rm -rf "$PKGMK_WORK_DIR"
-	fi
 	error "Cannot prepare tmpfs work directory '$PKGMK_WORK_DIR'."
 	exit 1
 }
 
 native_work_remove()
 {
-	# Keep the private reservation across automatic setup and repeated requests.
-	if [[ $PKGMK_TMPFS == yes && $PKGMK_WORK_DIR == "${__imai_tmpfs_work-}" ]]; then
-		(
-			unset GLOBIGNORE
-			set +f
-			shopt -u failglob
-			shopt -s dotglob nullglob
-			rm -rf -- "${PKGMK_WORK_DIR:?}"/*
-		) || native_work_failed
-	else
+	if ! native_rpc work-managed; then
 		remove_work_dir
 	fi
 }
@@ -712,9 +689,22 @@ make_work_dir()
 	native_rpc work-directory
 }
 
+native_work_discard()
+{
+	if ! native_rpc work-managed; then
+		rm -rf "$PKGMK_WORK_DIR"
+	fi
+}
+
+native_work_leave()
+{
+	cd "$PKGMK_ROOT" || exit 1
+	PKGMK_WORK_DIR=$PKGMK_ROOT/work
+}
+
 remove_work_dir()
 {
-	rm -rf "$PKGMK_WORK_DIR"
+	native_work_discard
 }
 
 native_recipe_build()
@@ -722,6 +712,25 @@ native_recipe_build()
 	cd "$SRC"
 	# Preserve errexit in the recipe subshell, not an if/conditional context.
 	(
+		if [[ ${__imai_recipe_capture-no} == yes ]]; then
+			local saved_stdout saved_stderr
+			if { exec {saved_stdout}>&1 {saved_stderr}>&2; }; then
+				# shellcheck disable=SC2154 # Pipe identities supplied by native SET.
+				if "$PKGMK_NATIVE_COMMAND" --imai-internal check-capture \
+				    "$__imai_capture_dev0" "$__imai_capture_ino0" \
+				    "$__imai_capture_dev1" "$__imai_capture_ino1" &&
+				    { exec 1>&61; } && { exec 2>&62; }; then
+					:
+				else
+					exec 1>&"$saved_stdout"
+					exec 2>&"$saved_stderr"
+					warning "Recipe capture descriptors unavailable."
+				fi
+				exec {saved_stdout}>&- {saved_stderr}>&-
+			else
+				warning "Recipe capture descriptors unavailable."
+			fi
+		fi
 		set -e -x
 		build
 	)
@@ -849,7 +858,7 @@ interrupted()
 	error "Interrupted."
 
 	if [ "$PKGMK_KEEP_WORK" = "no" ]; then
-		rm -rf "$PKGMK_WORK_DIR"
+		native_work_discard
 	fi
 
 	exit 1
@@ -969,6 +978,10 @@ native_missing_argument()
 
 native_check_work_parent()
 {
+	case $PKGMK_BUILD_TIME in
+	yes|no) ;;
+	*) error "PKGMK_BUILD_TIME must be yes or no."; exit 1 ;;
+	esac
 	case $PKGMK_TMPFS in
 	no) check_directory "$(dirname "$PKGMK_WORK_DIR")" ;;
 	yes) ;;
@@ -1044,6 +1057,9 @@ PKGMK_SOURCE_DIR="$PWD"
 PKGMK_PACKAGE_DIR="$PWD"
 PKGMK_WORK_DIR="$PWD/work"
 PKGMK_TMPFS="no"
+# shellcheck disable=SC2034 # Accessed by native orchestration.
+PKGMK_LOG_DIR=""
+PKGMK_BUILD_TIME="no"
 
 # shellcheck disable=SC2034 # Accessed by C orchestration through GET/SET.
 PKGMK_COMPRESSION_MODE="gz"

@@ -2,12 +2,17 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mount.h>
+#include <sys/random.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -18,6 +23,206 @@ static int channel;
 static pid_t controller;
 static bool finished;
 static int child_status;
+static int output[2] = {-1, -1};
+static int log_sink = -1;
+static bool capture_used;
+static int work_base = -1;
+static char *managed_name;
+static struct stat reservation;
+static unsigned long long managed_mount;
+
+static void
+work_retained(void)
+{
+	if (managed_name)
+		fprintf(stderr,
+		    "pkgmk: Retained work directory '/var/tmp/pkgmk/%s'.\n",
+		    managed_name);
+}
+
+static int
+work_identity(const char *path, unsigned long long *identity)
+{
+	struct statx st;
+	if (statx(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, STATX_MNT_ID, &st) < 0)
+		return -1;
+	if (!(st.stx_mask & STATX_MNT_ID)) {
+		errno = ENOTSUP;
+		return -1;
+	}
+	*identity = st.stx_mnt_id;
+	return 0;
+}
+
+static int
+work_acquire(const char *name)
+{
+	struct stat st;
+	char path[NAME_MAX + 64];
+	if (managed_name) {
+		errno = EBUSY;
+		return -1;
+	}
+	if (!name[0] || !strcmp(name, ".") || !strcmp(name, "..") ||
+	    strchr(name, '/')) {
+		errno = EINVAL;
+		return -1;
+	}
+	int var =
+	    open("/var", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (var < 0)
+		return -1;
+	if (fstat(var, &st) < 0 || st.st_uid != 0 || (st.st_mode & 0022)) {
+		close(var);
+		errno = EPERM;
+		return -1;
+	}
+	int parent = openat(
+	    var, "tmp", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	close(var);
+	if (parent < 0)
+		return -1;
+	if (fstat(parent, &st) < 0 || st.st_uid != 0 ||
+	    ((st.st_mode & 0022) && !(st.st_mode & S_ISVTX))) {
+		close(parent);
+		errno = EPERM;
+		return -1;
+	}
+	if (mkdirat(parent, "pkgmk", 0700) < 0 && errno != EEXIST) {
+		close(parent);
+		return -1;
+	}
+	work_base = openat(
+	    parent, "pkgmk", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	close(parent);
+	if (work_base < 0)
+		return -1;
+	if (fstat(work_base, &st) < 0 || st.st_uid != 0 ||
+	    (st.st_mode & 07777) != 0700) {
+		errno = EPERM;
+		return -1;
+	}
+	char *copy = strdup(name);
+	if (!copy)
+		return -1;
+	if (mkdirat(work_base, name, 0700) < 0) {
+		free(copy);
+		return -1;
+	}
+	managed_name = copy;
+	if (fstatat(work_base, name, &reservation, AT_SYMLINK_NOFOLLOW) < 0)
+		return -1;
+	if (snprintf(path, sizeof(path), "/proc/self/fd/%d/%s", work_base,
+	        name) >= (int)sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	if (mount("tmpfs", path, "tmpfs", 0, "mode=0700") < 0) {
+		int saved = errno;
+		if (unlinkat(work_base, managed_name, AT_REMOVEDIR) == 0) {
+			free(managed_name);
+			managed_name = NULL;
+		}
+		errno = saved;
+		return -1;
+	}
+	if (work_identity(path, &managed_mount) < 0)
+		return -1;
+	return 0;
+}
+
+static int
+work_release(void)
+{
+	char *path = NULL;
+	unsigned long long identity;
+	struct stat st;
+	if (asprintf(&path, "/proc/self/fd/%d/%s", work_base, managed_name) <
+	    0)
+		return -1;
+	int result = -1;
+	if (work_identity(path, &identity) < 0 || identity != managed_mount) {
+		errno = ESTALE;
+		goto out;
+	}
+	if (umount2(path, 0) < 0)
+		goto out;
+	if (fstatat(work_base, managed_name, &st, AT_SYMLINK_NOFOLLOW) < 0 ||
+	    st.st_dev != reservation.st_dev ||
+	    st.st_ino != reservation.st_ino) {
+		errno = ESTALE;
+		goto out;
+	}
+	if (unlinkat(work_base, managed_name, AT_REMOVEDIR) < 0)
+		goto out;
+	free(managed_name);
+	managed_name = NULL;
+	close(work_base);
+	work_base = -1;
+	result = 0;
+out:
+	free(path);
+	return result;
+}
+
+static void
+observation_warning(void)
+{
+	fprintf(stderr, "pkgmk: warning: recipe logging unavailable: %s\n",
+	    strerror(errno));
+}
+
+static int
+write_bytes(int fd, const char *bytes, size_t size)
+{
+	while (size) {
+		ssize_t n = write(fd, bytes, size);
+		if (n < 0 && errno == EINTR)
+			continue;
+		if (n <= 0)
+			return -1;
+		bytes += n;
+		size -= (size_t)n;
+	}
+	return 0;
+}
+
+/* One bounded batch per stream also services writers after capture ends. */
+static void
+relay(void)
+{
+	for (int i = 0; i < 2; i++) {
+		char bytes[8192];
+		ssize_t n = read(output[i], bytes, sizeof(bytes));
+		if (n <= 0)
+			continue;
+		if (write_bytes(i + 1, bytes, (size_t)n) < 0) {
+			fprintf(stderr,
+			    "pkgmk: warning: recipe live output failed: %s\n",
+			    strerror(errno));
+			close(output[i]);
+			output[i] = -1;
+		}
+		if (log_sink >= 0 &&
+		    write_bytes(log_sink, bytes, (size_t)n) < 0) {
+			observation_warning();
+			close(log_sink);
+			log_sink = -1;
+		}
+	}
+}
+
+static int
+poll_channel(void)
+{
+	struct pollfd ready[3] = {{.fd = channel, .events = POLLIN},
+	    {.fd = output[0], .events = POLLIN},
+	    {.fd = output[1], .events = POLLIN}};
+	int status = poll(ready, 3, 50);
+	if (status >= 0)
+		relay();
+	return status < 0 ? -1 : !!ready[0].revents;
+}
 
 static int run(const char *mode, int argc, char **argv);
 
@@ -44,8 +249,7 @@ read_field(void)
 	char *text = NULL;
 	size_t used = 0, capacity = 0;
 	for (;;) {
-		struct pollfd ready = {.fd = channel, .events = POLLIN};
-		int available = poll(&ready, 1, 50);
+		int available = poll_channel();
 		if (available < 0 && errno == EINTR)
 			continue;
 		if (waitpid(controller, &child_status, WNOHANG) ==
@@ -470,6 +674,42 @@ out:
 static int
 work_directory(void)
 {
+	if (yes("PKGMK_TMPFS")) {
+		char *selected = get("PKGMK_WORK_DIR"),
+		     *root = get("PKGMK_ROOT");
+		char *automatic = NULL;
+		if (!selected || !root ||
+		    asprintf(&automatic, "%s/work", root) < 0) {
+			free(selected);
+			free(root);
+			return -1;
+		}
+		bool automatic_work = !strcmp(selected, automatic);
+		free(selected);
+		free(root);
+		free(automatic);
+		if (managed_name || automatic_work) {
+			char *name = get("name"), *path = NULL;
+			int result = name ? work_acquire(name) : -1;
+			if (result == 0 &&
+			    asprintf(&path, "/var/tmp/pkgmk/%s", name) >= 0) {
+				result = set("PKGMK_WORK_DIR", path);
+				fprintf(stderr,
+				    "pkgmk: Using tmpfs work directory "
+				    "'%s'.\n",
+				    path);
+			} else {
+				result = -1;
+			}
+			free(name);
+			free(path);
+			if (result != 0) {
+				perror("pkgmk: managed work directory");
+				call("native_exit", "1");
+				return 1;
+			}
+		}
+	}
 	if (call("native_work_select", NULL) != 0)
 		return 1;
 	char *work = get("PKGMK_WORK_DIR");
@@ -504,6 +744,103 @@ release:
 }
 
 static int
+recipe_build(void)
+{
+	char *directory = get("PKGMK_LOG_DIR");
+	bool timed = yes("PKGMK_BUILD_TIME");
+	struct timespec start, end;
+	bool clock_ok;
+	bool logging = directory && directory[0] && !capture_used &&
+	               output[0] >= 0 && output[1] >= 0;
+	if (directory && directory[0] && !logging) {
+		fprintf(stderr, "pkgmk: warning: skipping separate recipe log "
+		                "(capture used or unavailable).\n");
+	}
+	if (logging) {
+		char *root = get("PKGMK_ROOT"), *path = NULL;
+		if (root && asprintf(&path, "%s/%s", root, directory) >= 0) {
+			const char *selected =
+			    directory[0] == '/' ? directory : path;
+			int dir =
+			    open(selected, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+			unsigned long long random;
+			char name[64];
+			if (dir >= 0 && getrandom(&random, sizeof(random),
+			                    0) == sizeof(random)) {
+				snprintf(name, sizeof(name),
+				    "recipe-%016llx.log", random);
+				log_sink = openat(dir, name,
+				    O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW |
+				        O_CLOEXEC,
+				    0600);
+				if (log_sink >= 0 &&
+				    fchmod(log_sink, 0600) < 0) {
+					close(log_sink);
+					log_sink = -1;
+				}
+			}
+			if (log_sink >= 0)
+				fprintf(stderr, "pkgmk: Recipe log: %s/%s\n",
+				    selected, name);
+			else
+				observation_warning();
+			if (dir >= 0)
+				close(dir);
+		} else {
+			observation_warning();
+		}
+		free(root);
+		free(path);
+		logging = log_sink >= 0;
+	}
+	free(directory);
+	if (logging) {
+		capture_used = true;
+		for (int i = 0; i < 2; i++) {
+			struct stat st;
+			char number[64], variable[64];
+			if (fstat(output[i], &st) < 0)
+				break;
+			snprintf(number, sizeof(number), "%llu",
+			    (unsigned long long)st.st_dev);
+			snprintf(variable, sizeof(variable),
+			    "__imai_capture_dev%d", i);
+			set(variable, number);
+			snprintf(number, sizeof(number), "%llu",
+			    (unsigned long long)st.st_ino);
+			snprintf(variable, sizeof(variable),
+			    "__imai_capture_ino%d", i);
+			set(variable, number);
+		}
+		set("__imai_recipe_capture", "yes");
+	}
+	clock_ok = timed && clock_gettime(CLOCK_MONOTONIC, &start) == 0;
+	int result = call("native_recipe_build", NULL);
+	bool end_ok = timed && clock_gettime(CLOCK_MONOTONIC, &end) == 0;
+	if (logging) {
+		/* Do not wait for EOF: descendants may retain the writers. */
+		for (int i = 0; i < 16; i++)
+			relay();
+		if (log_sink >= 0)
+			close(log_sink);
+		log_sink = -1;
+		if (!finished && result >= 0)
+			set("__imai_recipe_capture", "no");
+	}
+	if (timed) {
+		if (clock_ok && end_ok)
+			fprintf(stderr, "pkgmk: Recipe elapsed: %.3f s\n",
+			    (double)(end.tv_sec - start.tv_sec) +
+			        (double)(end.tv_nsec - start.tv_nsec) /
+			            1000000000.0);
+		else
+			fprintf(stderr,
+			    "pkgmk: warning: recipe clock unavailable.\n");
+	}
+	return result;
+}
+
+static int
 build_package(void)
 {
 	char *target = get("TARGET");
@@ -520,7 +857,7 @@ build_package(void)
 	free(uid);
 	target_message("info", "Building '%s'.");
 	call("unpack_source", NULL);
-	int result = call("native_recipe_build", NULL);
+	int result = recipe_build();
 	char number[32];
 	snprintf(number, sizeof(number), "%d", result);
 	set("build_status", number);
@@ -554,8 +891,20 @@ build_package(void)
 				call("check_footprint", NULL);
 		}
 	}
-	if (equals("PKGMK_KEEP_WORK", "no"))
-		call("remove_work_dir", NULL);
+	if (equals("PKGMK_KEEP_WORK", "no")) {
+		if (managed_name) {
+			if (yes("BUILD_SUCCESSFUL")) {
+				if (call("native_work_leave", NULL) != 0 ||
+				    work_release() < 0) {
+					perror("pkgmk: cannot release managed "
+					       "work directory");
+					return call("native_exit", "1");
+				}
+			}
+		} else {
+			call("remove_work_dir", NULL);
+		}
+	}
 	if (yes("BUILD_SUCCESSFUL")) {
 		target_message("info", "Building '%s' succeeded.");
 		return 0;
@@ -688,6 +1037,8 @@ run(const char *mode, int argc, char **argv)
 		return lifecycle();
 	if (strcmp(mode, "recursive") == 0)
 		return recursive(argc, argv);
+	if (strcmp(mode, "work-managed") == 0)
+		return managed_name ? 0 : 1;
 	if (strcmp(mode, "work-directory") == 0)
 		return work_directory();
 	if (strcmp(mode, "build-package") == 0)
@@ -705,11 +1056,37 @@ pkgmk_workflow_launch(char **args)
 		perror("pkgmk: socketpair");
 		return 1;
 	}
+	int pipes[2][2] = {{-1, -1}, {-1, -1}};
+	bool pipes_ok = fcntl(61, F_GETFD) < 0 && errno == EBADF &&
+	                fcntl(62, F_GETFD) < 0 && errno == EBADF;
+	for (int i = 0; pipes_ok && i < 2; i++) {
+		int pair[2];
+		if (pipe2(pair, O_CLOEXEC) < 0) {
+			pipes_ok = false;
+			break;
+		}
+		for (int j = 0; j < 2; j++) {
+			pipes[i][j] = fcntl(pair[j], F_DUPFD_CLOEXEC, 64);
+			close(pair[j]);
+			if (pipes[i][j] < 0)
+				pipes_ok = false;
+		}
+	}
+	if (!pipes_ok) {
+		for (int i = 0; i < 2; i++)
+			for (int j = 0; j < 2; j++) {
+				close(pipes[i][j]);
+				pipes[i][j] = -1;
+			}
+	}
 	pid_t child = fork();
 	if (child < 0) {
 		perror("pkgmk: fork");
 		close(sockets[0]);
 		close(sockets[1]);
+		for (int i = 0; i < 2; i++)
+			for (int j = 0; j < 2; j++)
+				close(pipes[i][j]);
 		return 1;
 	}
 	if (child == 0) {
@@ -720,9 +1097,29 @@ pkgmk_workflow_launch(char **args)
 			close(sockets[1]);
 		if (fcntl(63, F_SETFD, 0) < 0)
 			_exit(1);
+		bool inherited = pipes_ok;
+		for (int i = 0; i < 2; i++) {
+			close(pipes[i][0]);
+			if (pipes_ok && dup2(pipes[i][1], 61 + i) < 0)
+				inherited = false;
+			close(pipes[i][1]);
+		}
+		if (pipes_ok && !inherited) {
+			close(61);
+			close(62);
+		}
 		execv("/bin/bash", args);
 		perror("pkgmk: /bin/bash");
 		_exit(1);
+	}
+	for (int i = 0; i < 2; i++) {
+		close(pipes[i][1]);
+		output[i] = pipes[i][0];
+		if (output[i] >= 0 &&
+		    fcntl(output[i], F_SETFL, O_NONBLOCK) < 0) {
+			close(output[i]);
+			output[i] = -1;
+		}
 	}
 	controller = child;
 	struct sigaction broken = {.sa_handler = SIG_IGN};
@@ -735,6 +1132,8 @@ pkgmk_workflow_launch(char **args)
 		kill(child, SIGTERM);
 		close(sockets[0]);
 		waitpid(child, NULL, 0);
+		for (int i = 0; i < 2; i++)
+			close(output[i]);
 		return 1;
 	}
 	setvbuf(control, NULL, _IONBF, 0);
@@ -760,17 +1159,22 @@ pkgmk_workflow_launch(char **args)
 			status = 1 << 8;
 			break;
 		}
-		struct pollfd ready = {.fd = sockets[0], .events = POLLIN};
-		int available = poll(&ready, 1, 50);
+		int available = poll_channel();
 		if (available < 0 && errno == EINTR)
 			continue;
-		if (available > 0 && (ready.revents & POLLIN)) {
+		if (available > 0) {
 			char *unused = NULL;
 			receive(&unused);
 			free(unused);
 		}
 	}
+	relay();
+	for (int i = 0; i < 2; i++)
+		close(output[i]);
 	fclose(control);
+	work_retained();
+	if (work_base >= 0)
+		close(work_base);
 	return WIFEXITED(status) ? WEXITSTATUS(status)
 	                         : 128 + WTERMSIG(status);
 }
