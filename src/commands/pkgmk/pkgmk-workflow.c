@@ -470,23 +470,26 @@ out:
 static int
 work_directory(void)
 {
+	if (call("native_work_select", NULL) != 0)
+		return 1;
 	char *work = get("PKGMK_WORK_DIR");
 	char *pkg = NULL, *src = NULL;
+	int status = -1;
 	if (!work || asprintf(&pkg, "%s/pkg", work) < 0 ||
-	    asprintf(&src, "%s/src", work) < 0) {
-		free(work);
-		free(pkg);
-		free(src);
-		return -1;
-	}
-	int status = set("PKG", pkg) < 0 || set("SRC", src) < 0 ? -1 : 0;
+	    asprintf(&src, "%s/src", work) < 0)
+		goto release;
+	status = set("PKG", pkg) < 0 || set("SRC", src) < 0 ? -1 : 0;
+release:
 	free(work);
 	free(pkg);
 	free(src);
-	if (status < 0)
+	if (status < 0) {
+		if (yes("PKGMK_TMPFS"))
+			call("native_work_failed", NULL);
 		return -1;
+	}
 	call("native_work_prepare", NULL);
-	call("remove_work_dir", NULL);
+	call("native_work_remove", NULL);
 	call("native_work_mkdir", NULL);
 	if (equals("PKGMK_IGNORE_SIGNATURE", "no") ||
 	    yes("PKGMK_CHECK_SIGNATURE")) {

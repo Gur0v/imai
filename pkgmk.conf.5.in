@@ -41,6 +41,16 @@ Working directory containing src and pkg staging directories.
 Default: work below the directory of Pkgfile. Configure only a directory
 whose contents may be removed by pkgmk.
 .TP
+.B PKGMK_TMPFS
+Set to yes to require executable, writable tmpfs for work. Default: no.
+With the final PKGMK_WORK_DIR equal to the default, pkgmk lazily allocates
+and prints a private directory below /tmp; explicitly assigning the default
+has the same effect. A nondefault work path is honored and must be on tmpfs.
+No filesystem is mounted and there is no disk fallback. Source downloads,
+finished packages and TMPDIR remain unchanged. Keep-work and extract-only
+retain work as usual. Tmpfs can swap, fill up and disappear at reboot;
+this option is not a build sandbox or a capacity guarantee.
+.TP
 .B PKGMK_DOWNLOAD_PROG
 Downloader: curl (default), GNU-compatible wget, wget2 or aria2c.
 Aria2c defaults to 4 connections per server, 4 splits, a 20 MiB minimum split

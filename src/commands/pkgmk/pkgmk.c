@@ -1,11 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
+#define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/magic.h>
 #include <openssl/evp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include "pkgmk-controller.h"
@@ -114,6 +118,29 @@ internal(int argc, char **argv)
 			result = 1;
 		}
 		return result;
+	}
+	if (argc == 2 && strcmp(argv[0], "check-tmpfs") == 0) {
+		struct statfs fs;
+		struct statvfs mount;
+		int fd = open(argv[1], O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+		const char *reason = NULL;
+		if (fd < 0)
+			reason = strerror(errno);
+		else if (fstatfs(fd, &fs) < 0 || fstatvfs(fd, &mount) < 0)
+			reason = strerror(errno);
+		else if (fs.f_type != TMPFS_MAGIC)
+			reason = "not tmpfs";
+		else if (mount.f_flag & (ST_NOEXEC | ST_RDONLY))
+			reason = "tmpfs is noexec or read-only";
+		else if (faccessat(fd, ".", R_OK | W_OK | X_OK, AT_EACCESS) <
+		         0)
+			reason = strerror(errno);
+		if (fd >= 0)
+			close(fd);
+		if (reason)
+			fprintf(stderr, "pkgmk: tmpfs directory %s: %s\n",
+			    argv[1], reason);
+		return reason ? 1 : 0;
 	}
 	if (argc == 2 && strcmp(argv[0], "check-directory") == 0) {
 		if (stat(argv[1], &st) < 0 || !S_ISDIR(st.st_mode))

@@ -630,15 +630,71 @@ check_footprint()
 	fi
 }
 
+native_work_select()
+{
+	[[ $PKGMK_TMPFS == yes ]] || return 0
+	if [[ $PKGMK_WORK_DIR == "${__imai_tmpfs_work-}" && ! -d $PKGMK_WORK_DIR ]]; then
+		PKGMK_WORK_DIR=$PKGMK_ROOT/work
+	fi
+	if [[ $PKGMK_WORK_DIR == "$PKGMK_ROOT/work" ]]; then
+		"$PKGMK_NATIVE_COMMAND" --imai-internal check-tmpfs /tmp || exit 1
+		PKGMK_WORK_DIR=$(mktemp -d /tmp/imai-pkgmk.XXXXXXXX) || {
+			error "Cannot allocate tmpfs work directory."
+			exit 1
+		}
+		__imai_tmpfs_work=$PKGMK_WORK_DIR
+		builtin printf "=======> Using tmpfs work directory '%s'.\n" "$PKGMK_WORK_DIR" || native_work_failed
+	else
+		"$PKGMK_NATIVE_COMMAND" --imai-internal check-tmpfs "$(dirname "$PKGMK_WORK_DIR")" || exit 1
+	fi
+	if [[ -e $PKGMK_WORK_DIR || -L $PKGMK_WORK_DIR ]]; then
+		"$PKGMK_NATIVE_COMMAND" --imai-internal check-tmpfs "$PKGMK_WORK_DIR" || native_work_failed
+	fi
+}
+
+native_work_failed()
+{
+	if [[ $PKGMK_KEEP_WORK == no && $PKGMK_WORK_DIR == "${__imai_tmpfs_work-}" ]]; then
+		rm -rf "$PKGMK_WORK_DIR"
+	fi
+	error "Cannot prepare tmpfs work directory '$PKGMK_WORK_DIR'."
+	exit 1
+}
+
+native_work_remove()
+{
+	# Keep the private reservation across automatic setup and repeated requests.
+	if [[ $PKGMK_TMPFS == yes && $PKGMK_WORK_DIR == "${__imai_tmpfs_work-}" ]]; then
+		(
+			unset GLOBIGNORE
+			set +f
+			shopt -u failglob
+			shopt -s dotglob nullglob
+			rm -rf -- "${PKGMK_WORK_DIR:?}"/*
+		) || native_work_failed
+	else
+		remove_work_dir
+	fi
+}
+
 native_work_prepare()
 {
 	umask 022
-	cd "$PKGMK_ROOT"
+	if [[ $PKGMK_TMPFS == yes ]]; then
+		cd "$PKGMK_ROOT" || native_work_failed
+	else
+		cd "$PKGMK_ROOT"
+	fi
 }
 
 native_work_mkdir()
 {
-	mkdir -p "$SRC" "$PKG"
+	if [[ $PKGMK_TMPFS == yes ]]; then
+		mkdir -p "$SRC" "$PKG" || native_work_failed
+		"$PKGMK_NATIVE_COMMAND" --imai-internal check-tmpfs "$PKGMK_WORK_DIR" || native_work_failed
+	else
+		mkdir -p "$SRC" "$PKG"
+	fi
 }
 
 native_copy_signature()
@@ -913,7 +969,11 @@ native_missing_argument()
 
 native_check_work_parent()
 {
-	check_directory "$(dirname "$PKGMK_WORK_DIR")"
+	case $PKGMK_TMPFS in
+	no) check_directory "$(dirname "$PKGMK_WORK_DIR")" ;;
+	yes) ;;
+	*) error "PKGMK_TMPFS must be yes or no."; exit 1 ;;
+	esac
 }
 
 native_write_md5sum()
@@ -983,6 +1043,7 @@ PKGMK_SOURCE_DIR="$PWD"
 # shellcheck disable=SC2034 # Accessed by C orchestration through GET/SET.
 PKGMK_PACKAGE_DIR="$PWD"
 PKGMK_WORK_DIR="$PWD/work"
+PKGMK_TMPFS="no"
 
 # shellcheck disable=SC2034 # Accessed by C orchestration through GET/SET.
 PKGMK_COMPRESSION_MODE="gz"

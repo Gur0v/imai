@@ -7,7 +7,8 @@ case $command in /*) ;; *) command=$PWD/$command ;; esac
 # All executable configuration and generated files stay in a disposable root.
 # shellcheck disable=SC2016
 bwrap --unshare-all --die-with-parent --ro-bind / / --dev /dev --proc /proc \
-    --tmpfs /tmp --ro-bind "$command" /tmp/pkgmk --chdir /tmp -- /bin/dash -eu -c '
+    --tmpfs /tmp --tmpfs /tmp/readonly --remount-ro /tmp/readonly \
+    --perms 0000 --tmpfs /tmp/denied --ro-bind "$command" /tmp/pkgmk --chdir /tmp -- /bin/dash -eu -c '
 magic=$(od -An -tx1 -N4 /tmp/pkgmk | tr -d " \n")
 [ "$magic" = 7f454c46 ]
 printf abc >"input space"
@@ -32,6 +33,11 @@ printf abc | md5sum - - >expected
 cmp expected actual
 if /tmp/pkgmk --imai-internal digest md5 "input space" >/dev/full 2>err; then exit 1; fi
 [ -s err ]
+/tmp/pkgmk --imai-internal check-tmpfs /tmp
+for path in /tmp/readonly /tmp/denied /tmp/missing /etc/passwd /sys; do
+    if /tmp/pkgmk --imai-internal check-tmpfs "$path" >out 2>err; then exit 1; fi
+    grep -q "tmpfs directory" err
+done
 /tmp/pkgmk --imai-internal check-directory /tmp
 if /tmp/pkgmk --imai-internal check-directory absent; then exit 1; else [ "$?" = 1 ]; fi
 if /tmp/pkgmk --imai-internal check-directory "input space"; then exit 1; else [ "$?" = 1 ]; fi
@@ -105,5 +111,30 @@ exit 93
 EOF
 if /tmp/pkgmk -cf "config file" -um >out 2>err; then exit 1; else [ "$?" = 1 ]; fi
 grep -q "ERROR: Interrupted." err
+'
+# Requires mount and namespace-local CAP_SYS_ADMIN during setup only.
+# The tested process retains no capabilities and gets namespace-matched procfs.
+# shellcheck disable=SC2016
+bwrap --unshare-all --die-with-parent --uid 0 --gid 0 --ro-bind / / \
+    --dev /dev --proc /proc --tmpfs /tmp --cap-add CAP_SYS_ADMIN \
+    --ro-bind "$command" /tmp/pkgmk --ro-bind "$root" /tmp/disk \
+    --chdir /tmp -- /bin/dash -eu -c '
+mkdir /tmp/noexec
+mount -t tmpfs -o noexec,nosuid,nodev tmpfs /tmp/noexec
+exec bwrap --die-with-parent --ro-bind / / --bind /tmp /tmp \
+    --dev /dev --proc /proc --cap-drop ALL --chdir /tmp -- /bin/dash -eu -c '\''
+grep -Eq "^CapEff:[[:space:]]+0+$" /proc/self/status
+printf "#!/bin/sh\nexit 0\n" >/tmp/noexec/probe
+chmod 700 /tmp/noexec/probe
+if /tmp/noexec/probe >out 2>err; then exit 1; else [ "$?" = 126 ]; fi
+if /tmp/pkgmk --imai-internal check-tmpfs /tmp/noexec >out 2>err; then exit 1; fi
+grep -q "tmpfs directory" err
+if [ "$(stat -f -c %t /tmp/disk)" = 1021994 ]; then
+    printf "SKIP: repository filesystem is tmpfs; no disk-backed control\n"
+else
+    if /tmp/pkgmk --imai-internal check-tmpfs /tmp/disk >out 2>err; then exit 1; fi
+    grep -q "tmpfs directory" err
+fi
+'\''
 '
 printf 'PASS: native pkgmk ELF, digest bytes, argv and persistent overrides\n'
