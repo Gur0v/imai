@@ -64,7 +64,7 @@ pkgrm_run(int argc, char **argv)
 	struct database db = {0};
 	struct package removed = {0};
 	int result = 1;
-	int fd = open(*root ? root : "/", O_PATH | O_DIRECTORY | O_CLOEXEC);
+	int fd = open(root, O_PATH | O_DIRECTORY | O_CLOEXEC);
 	if (fd < 0) {
 		fprintf(stderr,
 		    "pkgrm: could not read directory %svar/lib/pkg: %s\n",
@@ -106,10 +106,8 @@ pkgrm_run(int argc, char **argv)
 	for (size_t i = removed.count; i; i--) {
 		if (fs_remove(fd, removed.files[i - 1]) < 0 &&
 		    errno != ENOENT && errno != ENOTDIR)
-			fprintf(stderr, "pkgrm: could not remove %s%s%s: %s\n",
-			    root,
-			    *root && root[strlen(root) - 1] == '/' ? "" : "/",
-			    removed.files[i - 1], strerror(errno));
+			fprintf(stderr, "pkgrm: could not remove %s%s: %s\n",
+			    root, removed.files[i - 1], strerror(errno));
 	}
 	result = 0;
 	if (command_ldconfig(fd, "pkgrm") < 0)
