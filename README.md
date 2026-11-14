@@ -1,7 +1,17 @@
 # imai
 
-A C23 reimplementation of the CRUX utilities: `pkgadd`, `pkgrm`, `pkginfo`,
-`pkgmk` and `rejmerge`. The latter two require Bash.
+A C23 replacement for CRUX pkgutils: `pkgadd`, `pkgrm`, `pkginfo`,
+`pkgmk` and `rejmerge`. Supports existing CRUX packages, databases,
+Pkgfiles and configuration files. The latter two commands require Bash.
+
+## Features
+
+- Full archive validation and destination preflight before installation.
+- Root-scoped filesystem operations for package installation and removal.
+- Optional tmpfs builds through `PKGMK_TMPFS="yes"` in pkgmk.conf.
+- curl, wget, Wget2 and aria2 download backends.
+
+See the manuals for configuration and compatibility details.
 
 ## Building and installing
 
