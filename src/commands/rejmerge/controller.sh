@@ -266,8 +266,8 @@ case $REJMERGE_CONF in
 esac
 work=$(mktemp -d) || exit 1
 TMPFILE=$work/merge
-: > "$TMPFILE" || exit 1
 trap _native_exit EXIT
+: > "$TMPFILE" || exit 1
 trap interrupted HUP INT QUIT TERM
 if [ -f "$REJMERGE_CONF" ]; then
 	# shellcheck disable=SC1090

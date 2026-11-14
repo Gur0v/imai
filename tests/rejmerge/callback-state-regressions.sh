@@ -150,5 +150,16 @@ printf "exit 7\n" > "$root/etc/rejmerge.conf"
 status=0
 /tmp/rejmerge -r "$root" >/tmp/output || status=$?
 [ "$status" = 7 ]
+mkdir /tmp/fail-bin
+cat > /tmp/fail-bin/mktemp <<"SH"
+#!/bin/sh
+mkdir /tmp/failed-work /tmp/failed-work/merge
+printf "%s\n" /tmp/failed-work
+SH
+chmod 755 /tmp/fail-bin/mktemp
+status=0
+PATH=/tmp/fail-bin:$PATH /tmp/rejmerge -r "$root" >/tmp/output 2>/tmp/error || status=$?
+[ "$status" = 1 ]
+[ ! -e /tmp/failed-work ]
 '
 printf 'PASS: native workflow nested callbacks, dynamic locals, cwd and filename bytes\n'
