@@ -17,7 +17,7 @@ cd /tmp/port
 trap '\''status=$?; if [ "$status" != 0 ]; then cat out err >&2; fi'\'' 0
 printf "" > config
 /tmp/tools/pkgmk --version > version
-grep -q "pkgmk (imai) 0.1.0" version
+grep -q "pkgmk (imai) 0.1.1" version
 /tmp/tools/pkgmk --help > help
 grep -q -- --refresh-signature help
 if /tmp/tools/pkgmk -cf >out 2>err; then exit 1; fi

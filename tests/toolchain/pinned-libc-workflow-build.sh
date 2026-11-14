@@ -72,7 +72,7 @@ for command in pkgmk rejmerge; do
             set -- -I"$crypto/include"
         fi
         "$cc" "$@" --sysroot="$sysroot" -B"$sysroot/usr/lib/" -std=c23 \
-            -D_POSIX_C_SOURCE=200809L -DVERSION=\"0.1.0\" -O2 \
+            -D_POSIX_C_SOURCE=200809L -DVERSION=\"0.1.1\" -O2 \
             -Wall -Wextra -Wpedantic -Wformat=2 \
             -Werror=implicit-function-declaration -fstack-protector-strong \
             -fstack-clash-protection -D_FORTIFY_SOURCE=3 -iquote src -iquote "$work" \
