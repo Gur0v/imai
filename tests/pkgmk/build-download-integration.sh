@@ -17,7 +17,7 @@ cd /tmp/port
 trap '\''status=$?; if [ "$status" != 0 ]; then cat out err >&2; fi'\'' 0
 printf "" > config
 /tmp/tools/pkgmk --version > version
-grep -q "pkgmk (imai) 0.1.2" version
+grep -q "pkgmk (imai) 0.1.3" version
 /tmp/tools/pkgmk --help > help
 grep -q -- --refresh-signature help
 if /tmp/tools/pkgmk -cf >out 2>err; then exit 1; fi
@@ -133,9 +133,8 @@ done
 printf "downloaded\n" >"$directory$output"
 EOF
 cp /tmp/download-tools/curl /tmp/download-tools/wget
-cp /tmp/download-tools/curl /tmp/download-tools/wget2
 cp /tmp/download-tools/curl /tmp/download-tools/aria2c
-chmod +x /tmp/download-tools/curl /tmp/download-tools/wget /tmp/download-tools/wget2 /tmp/download-tools/aria2c
+chmod +x /tmp/download-tools/curl /tmp/download-tools/wget /tmp/download-tools/aria2c
 cp config option-config
 cat >>option-config <<"EOF"
 PKGMK_CURL_OPTS="--connect-timeout 1
@@ -144,17 +143,16 @@ PKGMK_CURL_OPTS="--connect-timeout 1
 PKGMK_WGET_OPTS="--connect-timeout 1
 --max-time 2
 --literal *"
-PKGMK_WGET2_OPTS="$PKGMK_WGET_OPTS"
 PKGMK_ARIA2_OPTS="$PKGMK_WGET_OPTS"
 EOF
 printf "\nsource=(https://example.invalid/option-source)\nrenames=()\n" >>Pkgfile
 printf "%s\n" --connect-timeout 1 --max-time 2 --literal "*" >expected-options
-for downloader in aria2c wget2 curl wget; do
+for downloader in aria2c curl wget; do
     printf "\nPKGMK_DOWNLOAD_PROG=%s\n" "$downloader" >>option-config
     rm -f option-source
     PATH=/tmp/download-tools:$PATH /tmp/tools/pkgmk -cf option-config -do >out 2>err
     sed -n "/^--connect-timeout$/,$ p" /tmp/download-argv |
-        sed "/^https:/d; /^--server-response$/d; /^--output-file=/d" >actual-options
+        sed "/^https:/d" >actual-options
     cmp expected-options actual-options
 done
 # The network namespace has no external connectivity.

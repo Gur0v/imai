@@ -113,14 +113,12 @@ to retain the selected utility's filename encoding. Recipe digest calls with
 options also use the external utility. Signing and verification use
 .I /usr/bin/signify
 when requested. Downloads use curl by default. Set PKGMK_DOWNLOAD_PROG to
-wget for GNU-compatible wget, wget2 for GNU Wget2, or aria2c for aria2.
+wget for GNU-compatible wget or aria2c for aria2.
 BusyBox wget is explicitly rejected. Additional options use PKGMK_CURL_OPTS,
-PKGMK_WGET_OPTS, PKGMK_WGET2_OPTS or PKGMK_ARIA2_OPTS, respectively.
+PKGMK_WGET_OPTS or PKGMK_ARIA2_OPTS, respectively.
 Aria2c defaults to 4 connections per server, 4 splits, a 20 MiB minimum split
 size, 15-second connection timeout and 60-second timeout, with 3 attempts
-and a 3-second retry delay. It does not load aria2.conf. Wget2 supports HTTP and HTTPS, not FTP.
-Wget2 partial downloads require an HTTP 206 response to resume; an ignored
-range or a failed resume discards the partial file and retries from the start.
+and a 3-second retry delay. It does not load aria2.conf.
 Failed downloads are never renamed to the final source filename.
 Stripping uses file and binutils strip; manpage compression uses gzip.
 Builds additionally need all tools invoked by the port.

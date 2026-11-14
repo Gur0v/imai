@@ -12,7 +12,7 @@ printf 'Baseline build artifacts: %s\n' "$work"
 dash tests/toolchain/pinned-libc-c23-probe.sh "$sysroot"
 for source in main commands/ldconfig db/db commands/pkginfo/pkginfo archive/archive fs/fs cancel/cancel commands/pkgrm/pkgrm commands/pkgadd/pkgadd extraction/install config/config; do
     ${CC:-cc} --sysroot="$sysroot" -B"$sysroot/usr/lib/" -std=c23 \
-        -D_POSIX_C_SOURCE=200809L -DVERSION=\"0.1.2\" -O2 \
+        -D_POSIX_C_SOURCE=200809L -DVERSION=\"0.1.3\" -O2 \
         -Wall -Wextra -Wpedantic -Wformat=2 \
         -Werror=implicit-function-declaration -fstack-protector-strong \
         -fstack-clash-protection -D_FORTIFY_SOURCE=3 \

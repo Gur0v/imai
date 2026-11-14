@@ -29,7 +29,7 @@ server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
 thread = threading.Thread(target=server.serve_forever)
 thread.start()
 try:
-    for backend in ("aria2c", "curl", "wget2"):
+    for backend in ("aria2c", "curl"):
         if shutil.which(backend) is None:
             print("SKIP: actual " + backend + " backend (not installed)", flush=True)
             continue

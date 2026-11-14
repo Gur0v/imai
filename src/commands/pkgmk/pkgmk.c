@@ -4,12 +4,15 @@
 #include <fcntl.h>
 #include <linux/magic.h>
 #include <openssl/evp.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "pkgmk-controller.h"
@@ -90,11 +93,129 @@ out:
 	return result;
 }
 
+static volatile sig_atomic_t download_signal;
+
+static void
+download_termination(int number)
+{
+	if (!download_signal)
+		download_signal = number;
+}
+
+static int
+download_register(FILE *protocol, long pid)
+{
+	char *field = NULL;
+	size_t size = 0;
+	if (fprintf(protocol, "RUN%cdownload-runner%c1%c%ld%c", 0, 0, 0, pid,
+	        0) < 0 ||
+	    fflush(protocol) == EOF)
+		return -1;
+	int status = -1;
+	for (int i = 0; i < 3; i++) {
+		ssize_t length = getdelim(&field, &size, 0, protocol);
+		if (length <= 0 || field[length - 1] != '\0') {
+			status = -1;
+			goto out;
+		}
+		if (i == 0 && strcmp(field, "R"))
+			goto out;
+		if (i == 1)
+			status = strcmp(field, "0") ? -1 : 0;
+	}
+out:
+	free(field);
+	return status;
+}
+
+static int
+download_run(char **argv)
+{
+	const int signals[] = {SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+	struct sigaction action = {
+	    .sa_handler = download_termination, .sa_flags = SA_RESTART};
+	struct sigaction previous[sizeof(signals) / sizeof(signals[0])];
+	sigset_t blocked, mask;
+	sigemptyset(&action.sa_mask);
+	sigemptyset(&blocked);
+	for (size_t i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+		sigaddset(&blocked, signals[i]);
+		if (sigaction(signals[i], NULL, &previous[i]) < 0 ||
+		    (previous[i].sa_handler != SIG_IGN &&
+		        sigaction(signals[i], &action, NULL) < 0))
+			return 1;
+	}
+	FILE *protocol = fdopen(63, "r+");
+	if (!protocol)
+		return 1;
+	setvbuf(protocol, NULL, _IONBF, 0);
+	if (download_register(protocol, (long)getpid()) < 0)
+		return 1;
+	if (sigprocmask(SIG_BLOCK, &blocked, &mask) < 0) {
+		download_register(protocol, 0);
+		fclose(protocol);
+		return 1;
+	}
+	pid_t child = fork();
+	if (child == 0) {
+		if (setpgid(0, 0) < 0)
+			_exit(126);
+		for (size_t i = 0; i < sizeof(signals) / sizeof(signals[0]);
+		    i++)
+			if (sigaction(signals[i], &previous[i], NULL) < 0)
+				_exit(126);
+		if (sigprocmask(SIG_SETMASK, &mask, NULL) < 0)
+			_exit(126);
+		close(63);
+		execvp(argv[0], argv);
+		perror(argv[0]);
+		_exit(127);
+	}
+	int status = 1 << 8;
+	if (child > 0)
+		setpgid(child, child);
+	if (sigprocmask(SIG_SETMASK, &mask, NULL) < 0) {
+		if (child > 0) {
+			kill(child, SIGKILL);
+			while (
+			    waitpid(child, &status, 0) < 0 && errno == EINTR)
+				;
+		}
+		download_register(protocol, 0);
+		fclose(protocol);
+		return 1;
+	}
+	if (child > 0) {
+		bool forwarded = false;
+		for (;;) {
+			if (download_signal && !forwarded) {
+				kill(-child, download_signal);
+				forwarded = true;
+			}
+			pid_t done = waitpid(child, &status, WNOHANG);
+			if (done == child)
+				break;
+			if (done < 0 && errno != EINTR)
+				break;
+			struct timespec delay = {.tv_nsec = 10000000};
+			nanosleep(&delay, NULL);
+		}
+	}
+	download_register(protocol, 0);
+	fclose(protocol);
+	if (download_signal)
+		return 128 + download_signal;
+	return WIFEXITED(status) ? WEXITSTATUS(status)
+	                         : 128 + WTERMSIG(status);
+}
+
 static int
 internal(int argc, char **argv)
 {
 	struct stat st;
 
+	if (argc >= 2 && strcmp(argv[0], "download-run") == 0)
+		return download_run(argv + 1);
 	if (argc == 5 && strcmp(argv[0], "check-capture") == 0) {
 		for (int i = 0; i < 2; i++) {
 			int flags = fcntl(61 + i, F_GETFL);

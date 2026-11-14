@@ -48,9 +48,10 @@ With the final PKGMK_WORK_DIR equal to the default, pkgmk reserves
 Explicitly assigning the default has the same effect. The parent is created mode0700 when absent and must otherwise be a
 root-owned mode0700 directory; existing work directories are never adopted.
 Recipe names must be nonempty single path components other than dot or dot-dot.
-Successful packaging and footprint checks permit ordinary unmount and directory
-removal unless keep-work is selected. Failures, interruption and extract-only
-retain work and print its location. Busy mounts are retained with failure status;
+Successful builds and signature, MD5 or footprint check failures release managed
+work by ordinary unmount and directory removal unless keep-work is selected.
+A footprint check failure leaves the generated package intact. Recipe or extraction
+failures, interruption and extract-only retain work and print its location. Busy mounts are retained with failure status;
 pkgmk never forces or lazily detaches them. Retained mounts require manual cleanup
 before rebuilding the same recipe. Mounting requires appropriate privileges.
 A nondefault work path retains the existing cleanup behavior and must be on tmpfs;
@@ -81,16 +82,13 @@ skipped builds are not timed. Clock or reporting failures must not change the
 recipe result. No timing history is retained.
 .TP
 .B PKGMK_DOWNLOAD_PROG
-Downloader: curl (default), GNU-compatible wget, wget2 or aria2c.
+Downloader: curl (default), GNU-compatible wget or aria2c.
 Aria2c defaults to 4 connections per server, 4 splits, a 20 MiB minimum split
 size, 15-second connection timeout and 60-second timeout, with 3 attempts
 and a 3-second retry delay. It does not load aria2.conf.
 BusyBox wget is explicitly rejected because it lacks required options.
-Wget2 supports HTTP and HTTPS, not FTP. Its partial downloads require an
-HTTP 206 response to resume; otherwise the partial is discarded and the
-original URL is retried from the start.
 .TP
-.B PKGMK_CURL_OPTS, PKGMK_WGET_OPTS, PKGMK_WGET2_OPTS, PKGMK_ARIA2_OPTS
+.B PKGMK_CURL_OPTS, PKGMK_WGET_OPTS, PKGMK_ARIA2_OPTS
 Additional arguments for the corresponding downloader, split on shell whitespace
 without globbing. Embedded quote characters are not reinterpreted as shell
 quoting. Default: empty.

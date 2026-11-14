@@ -30,10 +30,18 @@ static int work_base = -1;
 static char *managed_name;
 static struct stat reservation;
 static unsigned long long managed_mount;
+static bool discard_checked_work;
+static volatile sig_atomic_t termination_requested;
+static volatile sig_atomic_t downloader_runner;
+
+static int work_release(void);
 
 static void
 work_retained(void)
 {
+	if (managed_name && discard_checked_work && !termination_requested &&
+	    work_release() < 0)
+		perror("pkgmk: cannot release managed work directory");
 	if (managed_name)
 		fprintf(stderr,
 		    "pkgmk: Retained work directory '/var/tmp/pkgmk/%s'.\n",
@@ -230,6 +238,9 @@ static void
 termination(int signal)
 {
 	int saved = errno;
+	termination_requested = signal;
+	if (downloader_runner > 1)
+		kill(downloader_runner, signal);
 	if (controller > 0)
 		kill(controller, signal);
 	errno = saved;
@@ -731,16 +742,24 @@ release:
 	call("native_work_prepare", NULL);
 	call("native_work_remove", NULL);
 	call("native_work_mkdir", NULL);
+	discard_checked_work = equals("PKGMK_KEEP_WORK", "no");
 	if (equals("PKGMK_IGNORE_SIGNATURE", "no") ||
 	    yes("PKGMK_CHECK_SIGNATURE")) {
 		test("native_copy_signature", NULL);
-		if (test("check_signature", NULL) == 0 &&
-		    test("native_md5_absent", NULL) == 0)
+		int signature = test("check_signature", NULL);
+		if (signature < 0)
+			return -1;
+		if (signature == 0 && test("native_md5_absent", NULL) == 0) {
+			discard_checked_work = false;
 			return 0;
+		}
 	}
-	if (equals("PKGMK_IGNORE_MD5SUM", "no"))
-		return call("check_md5sum", NULL);
-	return 0;
+	int result = equals("PKGMK_IGNORE_MD5SUM", "no")
+	                 ? call("check_md5sum", NULL)
+	                 : 0;
+	if (result >= 0)
+		discard_checked_work = false;
+	return result;
 }
 
 static int
@@ -887,8 +906,13 @@ build_package(void)
 			set("BUILD_SUCCESSFUL", "yes");
 			if (yes("PKGMK_IGNORE_FOOTPRINT"))
 				call("warning", "Footprint ignored.");
-			else
-				call("check_footprint", NULL);
+			else {
+				discard_checked_work =
+				    equals("PKGMK_KEEP_WORK", "no");
+				if (call("check_footprint", NULL) < 0)
+					return -1;
+				discard_checked_work = false;
+			}
 		}
 	}
 	if (equals("PKGMK_KEEP_WORK", "no")) {
@@ -1031,12 +1055,26 @@ out:
 static int
 run(const char *mode, int argc, char **argv)
 {
+	if (strcmp(mode, "download-runner") == 0 && argc == 1) {
+		char *end;
+		long pid = strtol(argv[0], &end, 10);
+		if (*end || pid < 0 || pid == 1 || pid > INT_MAX)
+			return 1;
+		downloader_runner = (sig_atomic_t)pid;
+		if (pid && termination_requested)
+			kill((pid_t)pid, termination_requested);
+		return 0;
+	}
 	if (strcmp(mode, "parse") == 0)
 		return parse(argc, argv);
 	if (strcmp(mode, "main") == 0)
 		return lifecycle();
 	if (strcmp(mode, "recursive") == 0)
 		return recursive(argc, argv);
+	if (strcmp(mode, "work-interrupted") == 0) {
+		termination_requested = 1;
+		return 0;
+	}
 	if (strcmp(mode, "work-managed") == 0)
 		return managed_name ? 0 : 1;
 	if (strcmp(mode, "work-directory") == 0)
@@ -1172,6 +1210,8 @@ pkgmk_workflow_launch(char **args)
 	for (int i = 0; i < 2; i++)
 		close(output[i]);
 	fclose(control);
+	if (WIFSIGNALED(status))
+		discard_checked_work = false;
 	work_retained();
 	if (work_base >= 0)
 		close(work_base);

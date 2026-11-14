@@ -120,27 +120,17 @@ check_file()
 	fi
 }
 
-# shellcheck disable=SC2329 # Selected through DOWNLOAD_CMD in download_file.
-download_wget2()
+native_download()
 {
-	local log status response resuming=no
-	if [ "${#RESUME_OPTS[@]}" -gt 0 ] && [ -f "$LOCAL_FILENAME_PARTIAL" ]; then
-		resuming=yes
-	fi
-	log=$(mktemp) || return 1
-	wget2 "$@" --server-response "--output-file=$log"
-	status=$?
-	cat "$log"
-	# Wget2 2.3.0 can append HTTP 200 to partial files; require 206 on resume.
-	if [ "$resuming" = yes ] && [ "$status" = 0 ]; then
-		response=$(awk '/^HTTP\// { code = $2 } END { print code }' "$log")
-		[ "$response" = 206 ] || status=1
-	fi
-	if [ "$resuming" = yes ] && [ "$status" != 0 ]; then
-		rm -f "$LOCAL_FILENAME_PARTIAL"
-	fi
-	rm -f "$log"
-	return "$status"
+	case $1 in
+	curl|wget|aria2c)
+		if [[ $(type -t -- "$1") == file ]]; then
+			"$PKGMK_NATIVE_COMMAND" --imai-internal download-run "$@"
+			return $?
+		fi
+		;;
+	esac
+	"$@"
 }
 
 download_file()
@@ -193,15 +183,6 @@ download_file()
 		read -r -d '' -a EXTRA_OPTS <<< "$PKGMK_ARIA2_OPTS" || :
 		DOWNLOAD_OPTS+=("${EXTRA_OPTS[@]}")
 		;;
-	wget2)
-		DOWNLOAD_CMD=(download_wget2)
-		RESUME_CMD="-c"
-		DOWNLOAD_OPTS=(--compression=identity --no-directories
-			--tries=3 --waitretry=3
-			"--output-document=$LOCAL_FILENAME_PARTIAL")
-		read -r -d '' -a EXTRA_OPTS <<< "$PKGMK_WGET2_OPTS" || :
-		DOWNLOAD_OPTS+=("${EXTRA_OPTS[@]}")
-		;;
 	esac
 
 	if [ -f "$LOCAL_FILENAME_PARTIAL" ]; then
@@ -214,7 +195,7 @@ download_file()
 	BASENAME=$(get_basename "$1")
 	for REPO in "${PKGMK_SOURCE_MIRRORS[@]}"; do
 		REPO=${REPO%/}
-		"${DOWNLOAD_CMD[@]}" "${DOWNLOAD_OPTS[@]}" "${RESUME_OPTS[@]}" "$REPO"/"$BASENAME"
+		native_download "${DOWNLOAD_CMD[@]}" "${DOWNLOAD_OPTS[@]}" "${RESUME_OPTS[@]}" "$REPO"/"$BASENAME"
 		error=$?
 		if [ $error == 0 ]; then
 			break
@@ -223,7 +204,7 @@ download_file()
 
 	if [ $error != 0 ]; then
 		while true; do
-			"${DOWNLOAD_CMD[@]}" "${DOWNLOAD_OPTS[@]}" "${RESUME_OPTS[@]}" "$1"
+			native_download "${DOWNLOAD_CMD[@]}" "${DOWNLOAD_OPTS[@]}" "${RESUME_OPTS[@]}" "$1"
 			error=$?
 			if [ $error != 0 ] && [ "${#RESUME_OPTS[@]}" -gt 0 ]; then
 				info "Partial download failed, restarting"
@@ -854,6 +835,7 @@ build_needed()
 # shellcheck disable=SC2329
 interrupted()
 {
+	native_rpc work-interrupted
 	echo ""
 	error "Interrupted."
 

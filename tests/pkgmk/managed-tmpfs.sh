@@ -42,16 +42,61 @@ grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
 umount /var/tmp/pkgmk/managed
 rmdir /var/tmp/pkgmk/managed
 cp config base-config
-for failure in recipe footprint checksum signature; do
+for failure in recipe extraction footprint checksum signature; do
     cp base-config config
     case $failure in
     recipe) printf "build() { printf retained >\"\$SRC/sentinel\"; return 42; }\n" >>config ;;
+    extraction) printf "unpack_source() { printf retained >\"\$SRC/sentinel\"; exit 47; }\n" >>config ;;
     footprint) printf "PKGMK_IGNORE_FOOTPRINT=no\ncheck_footprint() { exit 43; }\n" >>config ;;
     checksum) printf "PKGMK_IGNORE_MD5SUM=no\ncheck_md5sum() { exit 44; }\n" >>config ;;
     signature) printf "PKGMK_IGNORE_SIGNATURE=no\ncheck_signature() { exit 45; }\n" >>config ;;
     esac
-    if /tmp/pkgmk -cf config -f >out 2>err; then exit 84; fi
+    status=0
+    /tmp/pkgmk -cf config -f >out 2>err || status=$?
+    case $failure in
+    recipe) [ "$status" -eq 1 ] ;;
+    extraction) [ "$status" -eq 47 ] ;;
+    footprint) [ "$status" -eq 43 ] ;;
+    checksum) [ "$status" -eq 44 ] ;;
+    signature) [ "$status" -eq 45 ] ;;
+    esac
+    if [ "$failure" = recipe ] || [ "$failure" = extraction ]; then
+        grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
+        grep -q "Retained work directory" err
+        umount /var/tmp/pkgmk/managed
+        rmdir /var/tmp/pkgmk/managed
+    else
+        [ ! -e /var/tmp/pkgmk/managed ]
+        ! grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
+        ! grep -q "Retained work directory" err
+        [ "$failure" != footprint ] || [ -f managed#1-1.pkg.tar.gz ]
+        if /tmp/pkgmk -cf config -f -kw >out 2>err; then exit 91; fi
+        grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
+        umount /var/tmp/pkgmk/managed
+        rmdir /var/tmp/pkgmk/managed
+    fi
+done
+for signal in KILL TERM; do
+    cp base-config config
+    cat >>config <<"EOF"
+PKGMK_IGNORE_MD5SUM=no
+check_md5sum() {
+    printf "%s\n" "$$" >controller-pid
+    printf retained >"$SRC/sentinel"
+    while :; do :; done
+}
+EOF
+    rm -f controller-pid
+    /tmp/pkgmk -cf config -f >out 2>err &
+    parent=$!
+    python3 -I -c "import os,time; end=time.monotonic()+5
+while not os.path.exists(\"controller-pid\"):
+    assert time.monotonic()<end
+    time.sleep(.01)"
+    kill -"$signal" "$(cat controller-pid)"
+    if wait "$parent"; then exit 92; fi
     grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
+    [ "$(cat /var/tmp/pkgmk/managed/src/sentinel)" = retained ]
     grep -q "Retained work directory" err
     umount /var/tmp/pkgmk/managed
     rmdir /var/tmp/pkgmk/managed
