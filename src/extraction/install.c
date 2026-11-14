@@ -942,25 +942,11 @@ out:
 			struct stat st;
 			if (fd >= 0 && !fstat(fd, &st) &&
 			    S_ISDIR(st.st_mode)) {
-				{
-					struct archive_entry *copy =
-					    archive_entry_clone(
-					        fixups[i].entry);
-					if (copy && !fixups[i].times) {
-						archive_entry_unset_atime(
-						    copy);
-						archive_entry_unset_mtime(
-						    copy);
-					}
-					if (!copy ||
-					    object_metadata(fd, copy, false,
-					        true, fixups[i].times) < 0) {
-						if (!saved)
-							saved = copy ? errno
-							             : ENOMEM;
-						result = -1;
-					}
-					archive_entry_free(copy);
+				if (object_metadata(fd, fixups[i].entry, false,
+				        true, fixups[i].times) < 0) {
+					if (!saved)
+						saved = errno;
+					result = -1;
 				}
 			}
 			if (fd >= 0)
