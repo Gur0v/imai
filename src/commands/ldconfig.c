@@ -65,8 +65,7 @@ command_ldconfig(int root, const char *command)
 		fprintf(stderr, "%s: could not read helper status: %s\n",
 		    command, strerror(errno));
 	close(errors[0]);
-	int status;
-	while (waitpid(child, &status, 0) < 0) {
+	while (waitpid(child, NULL, 0) < 0) {
 		if (errno == EINTR)
 			continue;
 		fprintf(stderr, "%s: waitpid() failed: %s\n", command,
