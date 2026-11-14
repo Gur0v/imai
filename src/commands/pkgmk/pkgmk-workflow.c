@@ -507,12 +507,11 @@ build_package(void)
 	if (!target)
 		return -1;
 	call("check_file", target);
+	free(target);
 	call("make_work_dir", NULL);
 	char *uid = get("UID");
-	if (!uid) {
-		free(target);
+	if (!uid)
 		return -1;
-	}
 	if (strcmp(uid, "0"))
 		call("warning", "Packages should be built as root.");
 	free(uid);
@@ -528,10 +527,8 @@ build_package(void)
 		call("compress_manpages", NULL);
 		call("native_build_result", NULL);
 		char *mode = get("PKGMK_COMPRESSION_MODE");
-		if (!mode) {
-			free(target);
+		if (!mode)
 			return -1;
-		}
 		const char *flag = NULL;
 		if (!strcmp(mode, "gz"))
 			flag = "-z";
@@ -558,12 +555,10 @@ build_package(void)
 		call("remove_work_dir", NULL);
 	if (yes("BUILD_SUCCESSFUL")) {
 		target_message("info", "Building '%s' succeeded.");
-		free(target);
 		return 0;
 	}
 	call("native_failed_touch", NULL);
 	target_message("error", "Building '%s' failed.");
-	free(target);
 	return call("native_exit", "1");
 }
 
