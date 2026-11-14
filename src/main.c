@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "db.h"
-#include "pkgadd.h"
+#include "db/db.h"
+#include "commands/pkgadd/pkgadd.h"
 
 #ifndef VERSION
 #define VERSION "0.1.0"

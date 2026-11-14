@@ -4,4 +4,4 @@
 -iquote
 build
 -iquote
-../build
+src

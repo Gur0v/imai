@@ -1,0 +1,28 @@
+#include <openssl/evp.h>
+#include <openssl/opensslv.h>
+#include <string.h>
+
+int
+main(void)
+{
+    static const unsigned char expected[] = {
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+        0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+        0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+        0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad
+    };
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int size = 0;
+
+    static const unsigned char md5[] = {
+        0x90, 0x01, 0x50, 0x98, 0x3c, 0xd2, 0x4f, 0xb0,
+        0xd6, 0x96, 0x3f, 0x7d, 0x28, 0xe1, 0x7f, 0x72
+    };
+
+    if (!EVP_Digest("abc", 3, digest, &size, EVP_md5(), NULL) ||
+        size != sizeof(md5) || memcmp(digest, md5, sizeof(md5)))
+        return 1;
+    return strcmp(OPENSSL_VERSION_STR, "3.6.5") ||
+        !EVP_Digest("abc", 3, digest, &size, EVP_sha256(), NULL) ||
+        size != sizeof(expected) || memcmp(digest, expected, sizeof(expected));
+}
