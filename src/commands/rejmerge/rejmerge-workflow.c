@@ -271,9 +271,8 @@ merge_menu(const char *a, const char *b)
 }
 
 static int
-file_menu(const char *a, const char *b, const char *type)
+file_menu(const char *a, const char *b, bool regular)
 {
-	bool regular = strcmp(type, "regular") == 0;
 	for (;;) {
 		one("info", a);
 		if (regular)
@@ -399,11 +398,11 @@ dispatch(const char *operation, int argc, char **argv)
 	if (strcmp(operation, "merge_menu") == 0 && argc == 2)
 		return merge_menu(argv[0], argv[1]);
 	if (strcmp(operation, "file_menu") == 0 && argc == 2)
-		return file_menu(argv[0], argv[1], "special");
+		return file_menu(argv[0], argv[1], false);
 	if (strcmp(operation, "diff_menu") == 0 && argc == 2) {
 		const char *request[] = {"diff", argv[0], argv[1]};
 		call("request", 3, request);
-		file_menu(argv[0], argv[1], "regular");
+		file_menu(argv[0], argv[1], true);
 		return call("_native_clear_temp", 0, NULL);
 	}
 	failure("invalid native workflow operation");
