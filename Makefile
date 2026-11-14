@@ -22,33 +22,17 @@ CRYPTO_LIBS = $$(pkg-config --static --libs libcrypto)
 all: build/pkgadd build/pkgrm build/pkginfo build/pkgmk \
     build/rejmerge $(MAN5) $(MAN8)
 
-build/pkgadd.8: pkgadd.8.in Makefile
+$(MAN5) $(MAN8): Makefile
 	mkdir -p build
-	sed 's/#VERSION#/$(VERSION)/g' pkgadd.8.in > $@
+	source=$@; sed 's/#VERSION#/$(VERSION)/g' "$${source#build/}.in" > $@
 
-build/pkgrm.8: pkgrm.8.in Makefile
-	mkdir -p build
-	sed 's/#VERSION#/$(VERSION)/g' pkgrm.8.in > $@
-
-build/pkginfo.8: pkginfo.8.in Makefile
-	mkdir -p build
-	sed 's/#VERSION#/$(VERSION)/g' pkginfo.8.in > $@
-
-build/pkgmk.8: pkgmk.8.in Makefile
-	mkdir -p build
-	sed 's/#VERSION#/$(VERSION)/g' pkgmk.8.in > $@
-
-build/rejmerge.8: rejmerge.8.in Makefile
-	mkdir -p build
-	sed 's/#VERSION#/$(VERSION)/g' rejmerge.8.in > $@
-
-build/pkgfile.5: pkgfile.5.in Makefile
-	mkdir -p build
-	sed 's/#VERSION#/$(VERSION)/g' pkgfile.5.in > $@
-
-build/pkgmk.conf.5: pkgmk.conf.5.in Makefile
-	mkdir -p build
-	sed 's/#VERSION#/$(VERSION)/g' pkgmk.conf.5.in > $@
+build/pkgadd.8: pkgadd.8.in
+build/pkgrm.8: pkgrm.8.in
+build/pkginfo.8: pkginfo.8.in
+build/pkgmk.8: pkgmk.8.in
+build/rejmerge.8: rejmerge.8.in
+build/pkgfile.5: pkgfile.5.in
+build/pkgmk.conf.5: pkgmk.conf.5.in
 
 build/main.o: src/main.c src/db/db.h src/commands/pkgadd/pkgadd.h Makefile
 	mkdir -p build
