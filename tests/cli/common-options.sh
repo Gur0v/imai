@@ -39,11 +39,11 @@ check()
 }
 
 for tool in pkgadd pkgrm pkginfo; do
-	check 0 "$tool (imai) 0.1.5
+	check 0 "$tool (imai) 0.1.6
 " '' "$bindir/$tool" --version
-	check 0 "$tool (imai) 0.1.5
+	check 0 "$tool (imai) 0.1.6
 " '' "$bindir/$tool" --bad --version
-	check 0 "$tool (imai) 0.1.5
+	check 0 "$tool (imai) 0.1.6
 " '' "$bindir/$tool" --root --version
 done
 

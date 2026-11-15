@@ -8,7 +8,7 @@
 #include "commands/pkgadd/pkgadd.h"
 
 #ifndef VERSION
-#define VERSION "0.1.5"
+#define VERSION "0.1.6"
 #endif
 
 static void

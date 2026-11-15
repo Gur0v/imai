@@ -18,9 +18,9 @@ for page in pkgadd.8 pkgrm.8 pkginfo.8 pkgmk.8 rejmerge.8 \
 		printf 'FAIL: missing versioned manual header: %s\n' "$source" >&2
 		exit 1
 	fi
-	sed 's/#VERSION#/0.1.5/g' "$source" >"$work/$page"
+	sed 's/#VERSION#/0.1.6/g' "$source" >"$work/$page"
 	if grep -F '#VERSION#' "$work/$page" >/dev/null ||
-	    ! grep -F '"imai 0.1.5"' "$work/$page" >/dev/null; then
+	    ! grep -F '"imai 0.1.6"' "$work/$page" >/dev/null; then
 		printf 'FAIL: version substitution: %s\n' "$source" >&2
 		exit 1
 	fi
