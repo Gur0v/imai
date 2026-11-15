@@ -292,12 +292,32 @@ work_release(void)
 	    0)
 		return -1;
 	int result = -1;
-	if (work_identity(path, &identity) < 0 || identity != managed_mount) {
-		errno = ESTALE;
+	struct timespec start, now;
+	if (clock_gettime(CLOCK_MONOTONIC, &start) < 0)
 		goto out;
+	for (;;) {
+		if (work_identity(path, &identity) < 0 ||
+		    identity != managed_mount) {
+			errno = ESTALE;
+			goto out;
+		}
+		if (umount2(path, 0) == 0)
+			break;
+		if (errno != EBUSY)
+			goto out;
+		if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
+			goto out;
+		if (now.tv_sec - start.tv_sec > 1 ||
+		    (now.tv_sec - start.tv_sec == 1 &&
+		        now.tv_nsec >= start.tv_nsec)) {
+			errno = EBUSY;
+			goto out;
+		}
+		/* Retry transient EBUSY without weakening ordinary unmount. */
+		struct timespec pause = {.tv_nsec = 10000000};
+		if (nanosleep(&pause, NULL) < 0)
+			goto out;
 	}
-	if (umount2(path, 0) < 0)
-		goto out;
 	if (fstatat(work_base, managed_name, &st, AT_SYMLINK_NOFOLLOW) < 0 ||
 	    st.st_dev != reservation.st_dev ||
 	    st.st_ino != reservation.st_ino) {

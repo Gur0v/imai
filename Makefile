@@ -192,6 +192,7 @@ test-pkgmk: all
 	dash tests/pkgmk/callback-state-regressions.sh
 	dash tests/pkgmk/recipe-observation.sh
 	dash tests/pkgmk/managed-tmpfs.sh
+	dash tests/pkgmk/work-release.sh
 	dash tests/pkgmk/download-cancellation.sh
 	dash tests/pkgmk/build-download-integration.sh
 

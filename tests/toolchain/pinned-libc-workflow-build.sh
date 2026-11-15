@@ -136,6 +136,9 @@ done
 run_test pkgmk-native dash tests/pkgmk/native-boundary-regressions.sh "$work/pkgmk"
 run_test pkgmk-observation dash tests/pkgmk/recipe-observation.sh "$work/pkgmk"
 run_test pkgmk-managed dash tests/pkgmk/managed-tmpfs.sh "$work/pkgmk"
+run_test pkgmk-release env CC="$cc" \
+    CFLAGS="--sysroot=$sysroot -B$sysroot/usr/lib/ -std=c23 -O2" \
+    LDFLAGS="-static" dash tests/pkgmk/work-release.sh
 run_test pkgmk-download-cancellation dash tests/pkgmk/download-cancellation.sh "$work/pkgmk"
 run_test rejmerge-native dash tests/rejmerge/native-boundary-regressions.sh "$work/rejmerge"
 run_test pkgmk-workflow dash tests/pkgmk/build-download-integration.sh "$root/../pkgutils/pkgmk.in" "$work/pkgmk"
