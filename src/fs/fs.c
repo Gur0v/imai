@@ -300,19 +300,8 @@ fs_remove(int root, const char *path)
 	bool directory = copy[length - 1] == '/';
 	while (length && copy[length - 1] == '/')
 		copy[--length] = '\0';
-	char *base = strrchr(copy, '/');
-	const char *parent = ".";
-	if (base) {
-		*base++ = '\0';
-		parent = copy;
-	} else {
-		base = copy;
-	}
-	struct open_how how = {
-	    .flags = O_PATH | O_DIRECTORY | O_CLOEXEC,
-	    .resolve = RESOLVE_IN_ROOT | RESOLVE_NO_MAGICLINKS,
-	};
-	int fd = syscall(SYS_openat2, root, parent, &how, sizeof(how));
+	const char *base;
+	int fd = path_parent(root, copy, &base);
 	int result = -1;
 	if (fd >= 0) {
 		/* AT_REMOVEDIR refuses final symlinks, including names ending
