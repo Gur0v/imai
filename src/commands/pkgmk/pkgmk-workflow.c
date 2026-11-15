@@ -249,11 +249,6 @@ work_acquire(const char *name)
 	managed_name = copy;
 	if (fstatat(work_base, name, &reservation, AT_SYMLINK_NOFOLLOW) < 0)
 		return -1;
-	if (snprintf(path, sizeof(path), "/proc/self/fd/%d/%s", work_base,
-	        name) >= (int)sizeof(path)) {
-		errno = ENAMETOOLONG;
-		return -1;
-	}
 	if (mount("tmpfs", path, "tmpfs", 0, "mode=0700") < 0) {
 		int saved = errno;
 		if (unlinkat(work_base, managed_name, AT_REMOVEDIR) == 0) {
