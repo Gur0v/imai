@@ -46,14 +46,22 @@ Set to yes to require executable, writable tmpfs for work. Default: no.
 With the final PKGMK_WORK_DIR equal to the default, pkgmk reserves
 /var/tmp/pkgmk/<recipe name> and mounts tmpfs there, containing src and pkg.
 Explicitly assigning the default has the same effect. The parent is created mode0700 when absent and must otherwise be a
-root-owned mode0700 directory; existing work directories are never adopted.
-Recipe names must be nonempty single path components other than dot or dot-dot.
+root-owned mode0700 directory. Unknown existing work directories are never adopted.
+Recipe names must be nonempty single path components other than dot, dot-dot or .state.
+The protected .state directory stores permanent per-recipe ownership locks and
+mount provenance. Locks are held throughout each managed build.
 Successful builds and signature, MD5 or footprint check failures release managed
 work by ordinary unmount and directory removal unless keep-work is selected.
 A footprint check failure leaves the generated package intact. Recipe or extraction
 failures, interruption and extract-only retain work and print its location. Busy mounts are retained with failure status;
-pkgmk never forces or lazily detaches them. Retained mounts require manual cleanup
-before rebuilding the same recipe. Mounting requires appropriate privileges.
+pkgmk never forces or lazily detaches them. The force option permits rebuilding
+inactive retained work only after its controller exited normally and its recorded
+ownership, unique mount identity, boot and mount namespace match. Active builds
+are refused without waiting. Recovery requires kernel unique mount-ID support
+(Linux6.8 or newer); ordinary managed builds do not. Untracked mounts, interrupted
+controllers, native-parent crashes and work retained by version0.1.3 require
+separately approved manual cleanup.
+Mounting requires appropriate privileges.
 A nondefault work path retains the existing cleanup behavior and must be on tmpfs;
 pkgmk does not mount or unmount it. There is no disk fallback. Source downloads,
 finished packages and TMPDIR remain unchanged. Tmpfs can swap, fill up and

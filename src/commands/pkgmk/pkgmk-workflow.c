@@ -8,7 +8,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mount.h>
+#include <sys/vfs.h>
+#include <linux/magic.h>
 #include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -27,6 +30,36 @@ static int output[2] = {-1, -1};
 static int log_sink = -1;
 static bool capture_used;
 static int work_base = -1;
+static int work_lock = -1;
+struct work_record {
+	unsigned long long magic, mount, device, inode, namespace;
+	unsigned long long unique_mount, retained;
+	char boot[36];
+};
+
+/* Linux 6.8 UAPI; older kernels leave this bit absent in stx_mask. */
+#ifndef STATX_MNT_ID_UNIQUE
+#define STATX_MNT_ID_UNIQUE 0x00004000U
+#endif
+
+static int
+work_record_context(struct work_record *record)
+{
+	struct stat st;
+	if (stat("/proc/self/ns/mnt", &st) < 0)
+		return -1;
+	record->namespace = st.st_ino;
+	int fd = open("/proc/sys/kernel/random/boot_id", O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return -1;
+	ssize_t size = read(fd, record->boot, sizeof(record->boot));
+	close(fd);
+	if (size != sizeof(record->boot)) {
+		errno = EIO;
+		return -1;
+	}
+	return 0;
+}
 static char *managed_name;
 static struct stat reservation;
 static unsigned long long managed_mount;
@@ -35,6 +68,19 @@ static volatile sig_atomic_t termination_requested;
 static volatile sig_atomic_t downloader_runner;
 
 static int work_release(void);
+
+static void
+work_mark_retained(void)
+{
+	struct work_record record;
+	if (pread(work_lock, &record, sizeof(record), 0) != sizeof(record))
+		return;
+	/* Only a reaped, normally exited controller permits later recovery. */
+	record.retained = 1;
+	if (pwrite(work_lock, &record, sizeof(record), 0) != sizeof(record) ||
+	    fsync(work_lock) < 0)
+		perror("pkgmk: cannot record retained work");
+}
 
 static void
 work_retained(void)
@@ -63,7 +109,7 @@ work_identity(const char *path, unsigned long long *identity)
 }
 
 static int
-work_acquire(const char *name)
+work_acquire(const char *name, bool force)
 {
 	struct stat st;
 	char path[NAME_MAX + 64];
@@ -110,12 +156,95 @@ work_acquire(const char *name)
 		errno = EPERM;
 		return -1;
 	}
+	if (!strcmp(name, ".state")) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (mkdirat(work_base, ".state", 0700) < 0 && errno != EEXIST)
+		return -1;
+	int state = openat(work_base, ".state",
+	    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (state < 0)
+		return -1;
+	if (fstat(state, &st) < 0 || st.st_uid != 0 ||
+	    (st.st_mode & 07777) != 0700) {
+		close(state);
+		errno = EPERM;
+		return -1;
+	}
+	work_lock = openat(state, name,
+	    O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
+	close(state);
+	if (work_lock < 0)
+		return -1;
+	if (fstat(work_lock, &st) < 0 || !S_ISREG(st.st_mode) ||
+	    st.st_uid != 0 || st.st_nlink != 1 ||
+	    (st.st_mode & 07777) != 0600) {
+		errno = EPERM;
+		return -1;
+	}
+	if (flock(work_lock, LOCK_EX | LOCK_NB) < 0)
+		return -1;
+	struct work_record context = {0}, recorded;
+	if (work_record_context(&context) < 0)
+		return -1;
+	if (snprintf(path, sizeof(path), "/proc/self/fd/%d/%s", work_base,
+	        name) >= (int)sizeof(path)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
 	char *copy = strdup(name);
 	if (!copy)
 		return -1;
 	if (mkdirat(work_base, name, 0700) < 0) {
-		free(copy);
-		return -1;
+		if (errno != EEXIST || !force) {
+			free(copy);
+			return -1;
+		}
+		unsigned long long identity;
+		struct statx base_mount, unique;
+		struct statfs fs;
+		if (pread(work_lock, &recorded, sizeof(recorded), 0) !=
+		        sizeof(recorded) ||
+		    st.st_size != sizeof(recorded) ||
+		    recorded.magic != 0x696d6169776f726bULL ||
+		    !recorded.retained || !recorded.unique_mount ||
+		    statx(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW,
+		        STATX_MNT_ID_UNIQUE, &unique) < 0 ||
+		    !(unique.stx_mask & STATX_MNT_ID_UNIQUE) ||
+		    unique.stx_mnt_id != recorded.unique_mount ||
+		    recorded.namespace != context.namespace ||
+		    memcmp(
+		        recorded.boot, context.boot, sizeof(context.boot)) ||
+		    fstatat(work_base, name, &st, AT_SYMLINK_NOFOLLOW) < 0 ||
+		    !S_ISDIR(st.st_mode) || st.st_uid != 0 ||
+		    (st.st_mode & 07777) != 0700 || statfs(path, &fs) < 0 ||
+		    fs.f_type != TMPFS_MAGIC ||
+		    work_identity(path, &identity) < 0 ||
+		    identity != recorded.mount ||
+		    statx(work_base, "", AT_EMPTY_PATH, STATX_MNT_ID,
+		        &base_mount) < 0 ||
+		    !(base_mount.stx_mask & STATX_MNT_ID) ||
+		    identity == base_mount.stx_mnt_id) {
+			fprintf(stderr, "pkgmk: Unknown managed work; manual "
+			                "recovery required.\n");
+			free(copy);
+			errno = ESTALE;
+			return -1;
+		}
+		if (umount2(path, 0) < 0) {
+			free(copy);
+			return -1;
+		}
+		if (fstatat(work_base, name, &st, AT_SYMLINK_NOFOLLOW) < 0 ||
+		    st.st_dev != recorded.device ||
+		    st.st_ino != recorded.inode ||
+		    unlinkat(work_base, name, AT_REMOVEDIR) < 0 ||
+		    mkdirat(work_base, name, 0700) < 0) {
+			free(copy);
+			errno = ESTALE;
+			return -1;
+		}
 	}
 	managed_name = copy;
 	if (fstatat(work_base, name, &reservation, AT_SYMLINK_NOFOLLOW) < 0)
@@ -135,6 +264,20 @@ work_acquire(const char *name)
 		return -1;
 	}
 	if (work_identity(path, &managed_mount) < 0)
+		return -1;
+	struct statx unique;
+	if (statx(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, STATX_MNT_ID_UNIQUE,
+	        &unique) == 0 &&
+	    (unique.stx_mask & STATX_MNT_ID_UNIQUE))
+		context.unique_mount = unique.stx_mnt_id;
+	context.magic = 0x696d6169776f726bULL;
+	context.mount = managed_mount;
+	context.device = reservation.st_dev;
+	context.inode = reservation.st_ino;
+	if (ftruncate(work_lock, 0) < 0 ||
+	    pwrite(work_lock, &context, sizeof(context), 0) !=
+	        sizeof(context) ||
+	    fsync(work_lock) < 0)
 		return -1;
 	return 0;
 }
@@ -165,6 +308,10 @@ work_release(void)
 		goto out;
 	free(managed_name);
 	managed_name = NULL;
+	if (ftruncate(work_lock, 0) < 0 || fsync(work_lock) < 0)
+		goto out;
+	close(work_lock);
+	work_lock = -1;
 	close(work_base);
 	work_base = -1;
 	result = 0;
@@ -701,7 +848,8 @@ work_directory(void)
 		free(automatic);
 		if (managed_name || automatic_work) {
 			char *name = get("name"), *path = NULL;
-			int result = name ? work_acquire(name) : -1;
+			int result =
+			    name ? work_acquire(name, yes("PKGMK_FORCE")) : -1;
 			if (result == 0 &&
 			    asprintf(&path, "/var/tmp/pkgmk/%s", name) >= 0) {
 				result = set("PKGMK_WORK_DIR", path);
@@ -1191,8 +1339,10 @@ pkgmk_workflow_launch(char **args)
 			break;
 		}
 		pid_t done = waitpid(child, &status, WNOHANG);
-		if (done == child)
+		if (done == child) {
+			finished = true;
 			break;
+		}
 		if (done < 0 && errno != EINTR) {
 			status = 1 << 8;
 			break;
@@ -1212,7 +1362,12 @@ pkgmk_workflow_launch(char **args)
 	fclose(control);
 	if (WIFSIGNALED(status))
 		discard_checked_work = false;
+	if (managed_name && finished && WIFEXITED(status) &&
+	    !termination_requested)
+		work_mark_retained();
 	work_retained();
+	if (work_lock >= 0)
+		close(work_lock);
 	if (work_base >= 0)
 		close(work_base);
 	return WIFEXITED(status) ? WEXITSTATUS(status)

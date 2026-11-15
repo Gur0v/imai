@@ -36,9 +36,60 @@ EOF
 [ ! -e /var/tmp/pkgmk/managed ]
 /tmp/pkgmk -cf config -f -kw >out 2>err
 [ -f /var/tmp/pkgmk/managed/pkg/usr/file ]
-if /tmp/pkgmk -cf config -f >out 2>err; then exit 83; fi
+rm managed#1-1.pkg.tar.gz
+if /tmp/pkgmk -cf config >out 2>err; then exit 83; fi
 [ -f /var/tmp/pkgmk/managed/pkg/usr/file ]
+printf stale >/var/tmp/pkgmk/managed/stale
+/tmp/pkgmk -cf config -f -kw >out 2>err
+[ ! -e /var/tmp/pkgmk/managed/stale ]
+[ -f /var/tmp/pkgmk/managed/pkg/usr/file ]
+/tmp/pkgmk -cf config -f >out 2>err
+[ ! -e /var/tmp/pkgmk/managed ]
+# Legacy and foreign mounts have no recorded ownership and must not be adopted.
+mkdir /var/tmp/pkgmk/managed
+mount -t tmpfs -o mode=0700 tmpfs /var/tmp/pkgmk/managed
+printf unknown >/var/tmp/pkgmk/managed/sentinel
+if /tmp/pkgmk -cf config -f >out 2>err; then exit 93; fi
+[ "$(cat /var/tmp/pkgmk/managed/sentinel)" = unknown ]
+grep -q "manual recovery" err
+umount /var/tmp/pkgmk/managed
+rmdir /var/tmp/pkgmk/managed
+# An active callback has no cwd/open reference to the mounted work.
+cp config active-config
+cat >>active-config <<"EOF"
+build() {
+    cd /tmp
+    printf ready > /tmp/active-ready
+    while [ ! -e /tmp/active-done ]; do sleep .01; done
+    mkdir -p "$PKG/usr"
+    printf payload >"$PKG/usr/file"
+}
+EOF
+/tmp/pkgmk -cf active-config -f >active-out 2>active-err &
+active=$!
+python3 -I -c "import os,time; end=time.monotonic()+5
+while not os.path.exists(\"/tmp/active-ready\"):
+    assert time.monotonic()<end
+    time.sleep(.01)"
+if /tmp/pkgmk -cf config -f >out 2>err; then exit 94; fi
 grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
+printf done >/tmp/active-done
+wait "$active"
+[ ! -e /var/tmp/pkgmk/managed ]
+# Native-parent death must not allow reclaim while its controller is alive.
+rm /tmp/active-ready /tmp/active-done
+printf "printf '\''%%s\\n'\'' \"\$\$\" > /tmp/orphan-controller\n" >>active-config
+/tmp/pkgmk -cf active-config -f >active-out 2>active-err &
+active=$!
+python3 -I -c "import os,time; end=time.monotonic()+5
+while not os.path.exists(\"/tmp/active-ready\"):
+    assert time.monotonic()<end
+    time.sleep(.01)"
+kill -KILL "$active"
+wait "$active" || :
+if /tmp/pkgmk -cf config -f >out 2>err; then exit 96; fi
+grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
+kill -KILL "$(cat /tmp/orphan-controller)"
 umount /var/tmp/pkgmk/managed
 rmdir /var/tmp/pkgmk/managed
 cp config base-config
@@ -98,6 +149,9 @@ while not os.path.exists(\"controller-pid\"):
     grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
     [ "$(cat /var/tmp/pkgmk/managed/src/sentinel)" = retained ]
     grep -q "Retained work directory" err
+    if /tmp/pkgmk -cf base-config -f >out 2>err; then exit 97; fi
+    grep -q "manual recovery" err
+    [ "$(cat /var/tmp/pkgmk/managed/src/sentinel)" = retained ]
     umount /var/tmp/pkgmk/managed
     rmdir /var/tmp/pkgmk/managed
 done
@@ -119,6 +173,8 @@ printf "name=../unsafe\n" >>config
 if /tmp/pkgmk -cf config -f >out 2>err; then exit 85; fi
 [ ! -e /var/tmp/unsafe ]
 cp base-config config
+rm -f /var/tmp/pkgmk/.state/managed
+rmdir /var/tmp/pkgmk/.state
 rmdir /var/tmp/pkgmk
 ln -s /tmp /var/tmp/pkgmk
 if /tmp/pkgmk -cf config -f >out 2>err; then exit 86; fi
@@ -140,6 +196,10 @@ if /tmp/pkgmk -cf config -f >out 2>err; then exit 88; fi
 grep -q "cannot release managed" err
 grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
 [ -f /var/tmp/pkgmk/managed/pkg/usr/file ]
+cp base-config config
+if /tmp/pkgmk -cf config -f >out 2>err; then exit 95; fi
+[ -f /var/tmp/pkgmk/managed/pkg/usr/file ]
+grep -q " /var/tmp/pkgmk/managed " /proc/self/mountinfo
 kill "$(cat holder)"
 # Wait for the holder to release its cwd before explicit test cleanup.
 python3 -I -c "import os,time; p=int(open(\"holder\").read()); end=time.monotonic()+5
