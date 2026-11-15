@@ -54,7 +54,7 @@ Successful builds and signature, MD5 or footprint check failures release managed
 work by ordinary unmount and directory removal unless keep-work is selected.
 A footprint check failure leaves the generated package intact. Recipe or extraction
 failures, interruption and extract-only retain work and print its location. Busy mounts are retained with failure status;
-pkgmk never forces or lazily detaches them. The force option permits rebuilding
+pkgmk never forces or lazily detaches them. A subsequent build replaces
 inactive retained work only after its controller exited normally and its recorded
 ownership, unique mount identity, boot and mount namespace match. Active builds
 are refused without waiting. Recovery requires kernel unique mount-ID support

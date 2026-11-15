@@ -109,7 +109,7 @@ work_identity(const char *path, unsigned long long *identity)
 }
 
 static int
-work_acquire(const char *name, bool force)
+work_acquire(const char *name)
 {
 	struct stat st;
 	char path[NAME_MAX + 64];
@@ -197,7 +197,7 @@ work_acquire(const char *name, bool force)
 	if (!copy)
 		return -1;
 	if (mkdirat(work_base, name, 0700) < 0) {
-		if (errno != EEXIST || !force) {
+		if (errno != EEXIST) {
 			free(copy);
 			return -1;
 		}
@@ -868,8 +868,7 @@ work_directory(void)
 		free(automatic);
 		if (managed_name || automatic_work) {
 			char *name = get("name"), *path = NULL;
-			int result =
-			    name ? work_acquire(name, yes("PKGMK_FORCE")) : -1;
+			int result = name ? work_acquire(name) : -1;
 			if (result == 0 &&
 			    asprintf(&path, "/var/tmp/pkgmk/%s", name) >= 0) {
 				result = set("PKGMK_WORK_DIR", path);

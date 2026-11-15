@@ -37,10 +37,11 @@ EOF
 /tmp/pkgmk -cf config -f -kw >out 2>err
 [ -f /var/tmp/pkgmk/managed/pkg/usr/file ]
 rm managed#1-1.pkg.tar.gz
-if /tmp/pkgmk -cf config >out 2>err; then exit 83; fi
+/tmp/pkgmk -cf config -kw >out 2>err
 [ -f /var/tmp/pkgmk/managed/pkg/usr/file ]
 printf stale >/var/tmp/pkgmk/managed/stale
-/tmp/pkgmk -cf config -f -kw >out 2>err
+rm managed#1-1.pkg.tar.gz
+/tmp/pkgmk -cf config -kw >out 2>err
 [ ! -e /var/tmp/pkgmk/managed/stale ]
 [ -f /var/tmp/pkgmk/managed/pkg/usr/file ]
 /tmp/pkgmk -cf config -f >out 2>err
