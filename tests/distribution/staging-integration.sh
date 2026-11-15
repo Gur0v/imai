@@ -60,4 +60,4 @@ make install DESTDIR="$stage"
 [ "$(find "$stage/usr/bin/pkgadd" -prune -perm 0755 -print)" = "$stage/usr/bin/pkgadd" ]
 [ "$(find "$stage/etc/pkgadd.conf" -prune -perm 0644 -print)" = "$stage/etc/pkgadd.conf" ]
 printf "staged installation checks passed\n"
-' sh "$root" "${1:-0.1.4}"
+' sh "$root" "${1:-0.1.5}"

@@ -3,7 +3,7 @@
 
 SHELL = /bin/dash
 CC = cc
-VERSION = 0.1.4
+VERSION = 0.1.5
 DESTDIR =
 BINDIR = /usr/bin
 ETCDIR = /etc
